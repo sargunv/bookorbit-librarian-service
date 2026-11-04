@@ -166,11 +166,13 @@ The PostgreSQL role needs `CONNECT` on the database, `USAGE` on `public`,
 need superuser access or schema mutation permissions. Additional grants required
 by future BookOrbit schema changes should be reviewed narrowly.
 
-Moves use hard links followed by unlink, so source and destination must be on
-the same filesystem. Journals under `ORIGINALS_ROOT/journals` record hashes and
-both paths before moves. Recovery reconciles them against committed catalog
-paths, retains the matching file and stops on ambiguity. Do not edit these
-journals by hand or run two service instances against the same library.
+Moves claim destinations with hard links before unlinking the source. When NAS
+ownership prevents linking an untouched source, a verified temporary copy
+supplies the destination link. Source and destination must be on the same
+filesystem. Journals under `ORIGINALS_ROOT/journals` record hashes and both
+paths before moves. Recovery reconciles them against committed catalog paths,
+retains the matching file and stops on ambiguity. Do not edit these journals by
+hand or run two service instances against the same library.
 
 Original copies live at `ORIGINALS_ROOT/books/<book-ID>/`, with a
 `manifest.json` that records the original catalog metadata, source paths and

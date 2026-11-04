@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"unicode"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -488,7 +489,7 @@ func (o *Organizer) recover(ctx context.Context) error {
 				if readErr != nil || other != m.Hash {
 					return fmt.Errorf("unresolved journal %s: neither valid file available", p)
 				}
-				if e = os.Link(drop, keep); e != nil {
+				if e = claimFile(drop, keep); e != nil {
 					return e
 				}
 				if e = syncDir(filepath.Dir(keep)); e != nil {
@@ -703,7 +704,7 @@ func (o *Organizer) Organize(ctx context.Context, book domain.Book) (result Resu
 		if e != nil {
 			return result, e
 		}
-		if _, err = tx.ExecContext(ctx, `UPDATE book_files SET book_id=$1,absolute_path=$2,rel_path=$3,updated_at=now() WHERE id=$4`, base.book.ID, m.To, filepath.ToSlash(rel), m.ID); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE book_files SET book_id=$1,absolute_path=$2,rel_path=$3,ino=NULL,updated_at=now() WHERE id=$4`, base.book.ID, m.To, filepath.ToSlash(rel), m.ID); err != nil {
 			return
 		}
 	}
@@ -729,7 +730,7 @@ func pathExists(p string) bool { _, e := os.Lstat(p); return e == nil || !errors
 
 // moveExclusive claims a destination atomically and never replaces an existing file.
 func moveExclusive(from, to string) error {
-	if err := os.Link(from, to); err != nil {
+	if err := claimFile(from, to); err != nil {
 		return err
 	}
 	if err := syncDir(filepath.Dir(to)); err != nil {
@@ -739,4 +740,61 @@ func moveExclusive(from, to string) error {
 		return err
 	}
 	return syncDir(filepath.Dir(from))
+}
+
+func claimFile(from, to string) error {
+	err := os.Link(from, to)
+	if !errors.Is(err, syscall.EPERM) && !errors.Is(err, syscall.EACCES) {
+		return err
+	}
+	// Linux protected_hardlinks rejects readable files owned by another NAS
+	// identity. Copy into a private temporary file, verify the bytes against the
+	// still-present source, then atomically claim the destination with that link.
+	return copyClaimFile(from, to)
+}
+
+func copyClaimFile(from, to string) error {
+	in, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	st, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	if !st.Mode().IsRegular() {
+		return errors.New("move source is not a regular file")
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(to), ".librarian-move-")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer func() { _ = os.Remove(name) }()
+	defer func() { _ = tmp.Close() }()
+	h := sha256.New()
+	if _, err = io.Copy(io.MultiWriter(tmp, h), in); err != nil {
+		return err
+	}
+	if err = tmp.Chmod(st.Mode().Perm()); err != nil {
+		return err
+	}
+	if err = tmp.Sync(); err != nil {
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	current, err := hashFile(from)
+	if err != nil {
+		return err
+	}
+	if current != hex.EncodeToString(h.Sum(nil)) {
+		return errors.New("move source changed while copying")
+	}
+	if err = os.Chtimes(name, st.ModTime(), st.ModTime()); err != nil {
+		return err
+	}
+	return os.Link(name, to)
 }

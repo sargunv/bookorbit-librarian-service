@@ -142,3 +142,34 @@ func TestDestinationClaimDoesNotOverwrite(t *testing.T) {
 		t.Fatal("destination changed")
 	}
 }
+
+func TestCopiedDestinationClaimPreservesBytesAndCollisions(t *testing.T) {
+	dir := t.TempDir()
+	src, dst := filepath.Join(dir, "source"), filepath.Join(dir, "destination")
+	if err := os.WriteFile(src, []byte("original bytes"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyClaimFile(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{src, dst} {
+		data, err := os.ReadFile(p)
+		if err != nil || string(data) != "original bytes" {
+			t.Fatalf("copy lost bytes: %s %v", p, err)
+		}
+	}
+	if err := os.WriteFile(src, []byte("changed source"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyClaimFile(src, dst); err == nil {
+		t.Fatal("copy replaced a claimed destination")
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil || string(data) != "original bytes" {
+		t.Fatal("collision changed destination")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 2 {
+		t.Fatal("temporary copy was not cleaned up")
+	}
+}
