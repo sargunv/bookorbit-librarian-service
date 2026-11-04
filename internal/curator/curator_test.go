@@ -105,6 +105,9 @@ func TestJudgeHTTPFallbackAndUntrustedInput(t *testing.T) {
 			t.Errorf("model %s", req.Model)
 		}
 		content := fmt.Sprintf(`{"match":1,"sameWork":true,"sameEdition":false,"needsReview":%t,"reason":"evidence","fieldSources":{"description":1}}`, review)
+		if count == 1 {
+			content = "```json\n" + content + "\n```"
+		}
 		_, _ = fmt.Fprintf(w, `{"model":%q,"choices":[{"message":{"content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":7}}`, req.Model, content)
 	}))
 	defer s.Close()

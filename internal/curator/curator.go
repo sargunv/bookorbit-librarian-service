@@ -141,7 +141,7 @@ func (c *Curator) call(ctx context.Context, model string, data []byte) (domain.D
 	}
 	// Require every decision field, including booleans, so omissions cannot silently pass as false.
 	var raw map[string]json.RawMessage
-	content := []byte(result.Choices[0].Message.Content)
+	content := []byte(decisionJSON(result.Choices[0].Message.Content))
 	if json.Unmarshal(content, &raw) != nil {
 		return zero, errors.New("invalid curator decision JSON")
 	}
@@ -162,6 +162,19 @@ func (c *Curator) call(ctx context.Context, model string, data []byte) (domain.D
 	zero.InputTokens = result.Usage.PromptTokens
 	zero.OutputTokens = result.Usage.CompletionTokens
 	return zero, nil
+}
+
+// Some compatible providers wrap JSON in a Markdown code fence even when JSON
+// response mode is requested. Accept one whole fence; prose or extra blocks still
+// fail the JSON/schema checks below.
+func decisionJSON(content string) string {
+	content = strings.TrimSpace(content)
+	for _, prefix := range []string{"```json\n", "```\n"} {
+		if strings.HasPrefix(content, prefix) && strings.HasSuffix(content, "\n```") {
+			return strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(content, prefix), "\n```"))
+		}
+	}
+	return content
 }
 
 var (
