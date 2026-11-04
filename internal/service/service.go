@@ -48,7 +48,9 @@ func New(c config.Config) (*Service, error) {
 		_ = db.Close()
 		return nil, e
 	}
-	return &Service{cfg: c, db: db, books: bookorbit.New(c.BookOrbitURL, c.BookOrbitToken), judge: curator.New(c.ModelURL, c.ModelKey, c.PrimaryModel, c.FallbackModel), organizer: org}, nil
+	judge := curator.New(c.ModelURL, c.ModelKey, c.PrimaryModel, c.FallbackModel)
+	judge.SetRequestInterval(c.ModelInterval)
+	return &Service{cfg: c, db: db, books: bookorbit.New(c.BookOrbitURL, c.BookOrbitToken), judge: judge, organizer: org}, nil
 }
 
 func (s *Service) Close() error { s.wg.Wait(); return errors.Join(s.organizer.Close(), s.db.Close()) }

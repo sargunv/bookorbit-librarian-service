@@ -19,8 +19,9 @@ compatibility before upgrading BookOrbit.
 2. Search configured providers, with the current title, authors, ISBN and book
    ID. Successful evidence from a partial provider failure remains usable, with
    a warning attached to the proposal. Complete search failures retry.
-3. Ask the primary model to select a matching record and fields. Ambiguity can
-   escalate to a configured fallback. Unresolved identities enter `review`.
+3. Ask the primary model to select a matching record and fields. Ambiguity and
+   contradictory selections can escalate to a configured fallback. Unresolved
+   identities enter `review`.
 4. Persist the candidates, decision, token usage, field provenance and proposed
    patch before applying changes. Models select evidence; they cannot supply new
    bibliographic facts. The first version selects fields from one matched
@@ -73,28 +74,29 @@ for OCI health.
 
 ## Configuration
 
-| Variable                          | Meaning / default                                                    |
-| --------------------------------- | -------------------------------------------------------------------- |
-| `ADMIN_TOKEN`                     | Required, at least 24 characters; bearer token for operations        |
-| `BOOKORBIT_URL`                   | Required HTTP(S) base URL, with optional `/api/v1` suffix            |
-| `BOOKORBIT_MAGIC_LINK_TOKEN`      | Required opaque application login token                              |
-| `MODEL_BASE_URL`, `MODEL_API_KEY` | Required OpenAI chat completions endpoint and key                    |
-| `MODEL_PRIMARY`                   | `claude/haiku-5-5`; use a name supported by your proxy               |
-| `MODEL_FALLBACK`                  | Optional model used for primary decisions marked for review          |
-| `METADATA_PROVIDERS`              | `hardcover,goodreads`; provider keys already configured in BookOrbit |
-| `LIBRARY_ID`                      | `1`                                                                  |
-| `LIBRARY_ROOT`                    | Required absolute library root, matching BookOrbit paths             |
-| `ORIGINALS_ROOT`                  | Required non-overlapping backup directory outside the scanned root   |
-| `BOOKORBIT_DATABASE_URL`          | Required only for file organization                                  |
-| `STATE_PATH`                      | `/data/librarian.db`                                                 |
-| `LISTEN_ADDR`                     | `:8080`                                                              |
-| `WORKERS`                         | `1`, maximum `4`; applying changes is serialized                     |
-| `MAX_ATTEMPTS`                    | `3`; automatic retries preserve saved proposals                      |
-| `JOB_TIMEOUT`                     | `8m`, allowed range `1m`–`30m`                                       |
-| `AUTO_APPLY`                      | `false`; otherwise safe proposals finish as `planned`                |
-| `ORGANIZE_FILES`                  | `false`                                                              |
-| `AUTO_DISCOVER`                   | `false`; discover on startup and periodically when enabled           |
-| `DISCOVERY_INTERVAL`              | `1h`, minimum `1m`                                                   |
+| Variable                          | Meaning / default                                                      |
+| --------------------------------- | ---------------------------------------------------------------------- |
+| `ADMIN_TOKEN`                     | Required, at least 24 characters; bearer token for operations          |
+| `BOOKORBIT_URL`                   | Required HTTP(S) base URL, with optional `/api/v1` suffix              |
+| `BOOKORBIT_MAGIC_LINK_TOKEN`      | Required opaque application login token                                |
+| `MODEL_BASE_URL`, `MODEL_API_KEY` | Required OpenAI chat completions endpoint and key                      |
+| `MODEL_PRIMARY`                   | `claude/haiku-5-5`; use a name supported by your proxy                 |
+| `MODEL_REQUEST_INTERVAL`          | `7s` between primary/fallback requests across workers; range `0s`–`1m` |
+| `MODEL_FALLBACK`                  | Optional model used for ambiguity or invalid primary selections        |
+| `METADATA_PROVIDERS`              | `hardcover,goodreads`; provider keys already configured in BookOrbit   |
+| `LIBRARY_ID`                      | `1`                                                                    |
+| `LIBRARY_ROOT`                    | Required absolute library root, matching BookOrbit paths               |
+| `ORIGINALS_ROOT`                  | Required non-overlapping backup directory outside the scanned root     |
+| `BOOKORBIT_DATABASE_URL`          | Required only for file organization                                    |
+| `STATE_PATH`                      | `/data/librarian.db`                                                   |
+| `LISTEN_ADDR`                     | `:8080`                                                                |
+| `WORKERS`                         | `1`, maximum `4`; applying changes is serialized                       |
+| `MAX_ATTEMPTS`                    | `3`; automatic retries preserve saved proposals                        |
+| `JOB_TIMEOUT`                     | `8m`, allowed range `1m`–`30m`                                         |
+| `AUTO_APPLY`                      | `false`; otherwise safe proposals finish as `planned`                  |
+| `ORGANIZE_FILES`                  | `false`                                                                |
+| `AUTO_DISCOVER`                   | `false`; discover on startup and periodically when enabled             |
+| `DISCOVERY_INTERVAL`              | `1h`, minimum `1m`                                                     |
 
 Use a dedicated shared BookOrbit account with library editor access and
 `library_edit_metadata` and `library_download` permissions. The client exchanges

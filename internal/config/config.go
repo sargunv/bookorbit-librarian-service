@@ -17,7 +17,7 @@ type Config struct {
 	Providers                                                   []string
 	LibraryID, Workers, MaxAttempts                             int
 	AutoApply, AutoDiscover, Organize                           bool
-	PollInterval, JobTimeout                                    time.Duration
+	PollInterval, JobTimeout, ModelInterval                     time.Duration
 }
 
 func Load() (Config, error) {
@@ -53,6 +53,10 @@ func Load() (Config, error) {
 	c.JobTimeout, err = time.ParseDuration(value("JOB_TIMEOUT", "8m"))
 	if err != nil || c.JobTimeout < time.Minute || c.JobTimeout > 30*time.Minute {
 		return c, errors.New("JOB_TIMEOUT must be between 1m and 30m")
+	}
+	c.ModelInterval, err = time.ParseDuration(value("MODEL_REQUEST_INTERVAL", "7s"))
+	if err != nil || c.ModelInterval < 0 || c.ModelInterval > time.Minute {
+		return c, errors.New("MODEL_REQUEST_INTERVAL must be between 0s and 1m")
 	}
 	for name, v := range map[string]string{"BOOKORBIT_URL": c.BookOrbitURL, "MODEL_BASE_URL": c.ModelURL} {
 		u, e := url.Parse(v)

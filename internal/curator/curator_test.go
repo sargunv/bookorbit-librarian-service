@@ -138,3 +138,20 @@ func TestJudgeErrorsDoNotFallbackOrLeak(t *testing.T) {
 		})
 	}
 }
+
+func TestContradictoryPrimaryEscalates(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		content := `{"match":1,"sameWork":true,"sameEdition":false,"needsReview":false,"reason":"work only","fieldSources":{"isbn13":1}}`
+		if calls == 2 {
+			content = `{"match":1,"sameWork":true,"sameEdition":false,"needsReview":false,"reason":"work only","fieldSources":{"description":1}}`
+		}
+		_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3}}`, content)
+	}))
+	defer server.Close()
+	d, err := New(server.URL, "key", "primary", "fallback").Judge(context.Background(), domain.Book{}, []domain.Candidate{{Metadata: domain.Metadata{Description: "Source evidence"}}})
+	if err != nil || calls != 2 || d.Model != "fallback" || d.InputTokens != 4 || d.OutputTokens != 6 {
+		t.Fatalf("decision %+v calls %d error %v", d, calls, err)
+	}
+}
