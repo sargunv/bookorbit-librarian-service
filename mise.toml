@@ -1,0 +1,26 @@
+[settings]
+experimental = true
+pin = true
+lockfile = true
+lockfile_mode = "merge"
+
+[tools]
+"aqua:dprint/dprint" = "0.64.3"
+"aqua:golangci/golangci-lint" = "2.15.0"
+"aqua:jdx/jactionlint" = "2.4.0"
+"github:jdx/hk" = "2.11.1"
+"core:go" = "1.27.3"
+
+[deps.go]
+auto = true
+
+[tasks.check]
+run = "hk check --all"
+[tasks.fix]
+run = "hk fix --all"
+[tasks.test]
+run = "go test -race ./..."
+[tasks.build]
+run = "CGO_ENABLED=0 go build -trimpath -ldflags=-s -o bin/librarian ./cmd/librarian"
+[hooks]
+postinstall = ["hk install --mise"]

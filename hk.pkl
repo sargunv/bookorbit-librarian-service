@@ -1,0 +1,18 @@
+amends "package://github.com/jdx/hk/releases/download/v2.11.1/hk@2.11.1#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v2.11.1/hk@2.11.1#/Builtins.pkl"
+steps {
+  ["dprint"] = Builtins.dprint
+  ["jactionlint"] = Builtins.jactionlint
+  ["gomod-tidy"] = (Builtins.gomod_tidy) {
+    glob = List("**/go.mod")
+    workspace_indicator = "go.mod"
+    check_diff = "cd {{workspace}} && go mod tidy -diff"
+    fix = "cd {{workspace}} && go mod tidy"
+  }
+  ["golangci-lint"] {
+    glob = List("**/*.go")
+    workspace_indicator = "go.mod"
+    check = "cd {{workspace}} && golangci-lint run --allow-parallel-runners ./..."
+    fix = "cd {{workspace}} && golangci-lint run --allow-parallel-runners --fix ./..."
+  }
+}
