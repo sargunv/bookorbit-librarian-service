@@ -16,7 +16,7 @@ func (s *Service) progress(ctx context.Context, j store.Job, title, stage string
 	if total > 0 {
 		switch stage {
 		case "vision":
-			message = fmt.Sprintf("Comparing %d cover images", total)
+			message = fmt.Sprintf("Comparing covers: %d of %d images", done, total)
 		case "metadata":
 			message = fmt.Sprintf("Choosing metadata and covers for %d books", total)
 		default:

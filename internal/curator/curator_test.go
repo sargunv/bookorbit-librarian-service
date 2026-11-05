@@ -140,3 +140,62 @@ func TestActivitySummaryCitesRealEvents(t *testing.T) {
 		}
 	}
 }
+
+func TestLargeCoverGroupBatchesOutputAndRetainsWholeGroupOverview(t *testing.T) {
+	var pngData bytes.Buffer
+	if err := png.Encode(&pngData, image.NewRGBA(image.Rect(0, 0, 8, 12))); err != nil {
+		t.Fatal(err)
+	}
+	calls, observed := 0, 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var req struct {
+			Messages []message `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		var manifest struct {
+			Targets []struct {
+				BookID int `json:"bookId"`
+				Source int `json:"source"`
+			} `json:"targets"`
+		}
+		if err := json.Unmarshal([]byte(req.Messages[0].Content[1].Text), &manifest); err != nil {
+			t.Error(err)
+			return
+		}
+		if len(manifest.Targets) > 48 {
+			t.Error("vision output batch unbounded")
+		}
+		if !strings.Contains(req.Messages[0].Content[2].Text, "REFERENCE OVERVIEW") {
+			t.Error("missing shared whole-group reference")
+		}
+		var covers []domain.CoverObservation
+		for _, target := range manifest.Targets {
+			covers = append(covers, domain.CoverObservation{BookID: target.BookID, Source: target.Source, Family: "blue illustrated"})
+		}
+		observed += len(covers)
+		content, _ := json.Marshal(struct {
+			Summary string                    `json:"summary"`
+			Covers  []domain.CoverObservation `json:"covers"`
+		}{"blue illustrated family", covers})
+		_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`, content)
+	}))
+	defer server.Close()
+	evidence := make([]domain.Evidence, 49)
+	for i := range evidence {
+		evidence[i].Book.ID = i + 1
+	}
+	report, supplied, err := New(server.URL, "key", "haiku", "terra").observe(context.Background(), evidence, func(context.Context, int) ([]byte, error) { return pngData.Bytes(), nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || observed != 49 || len(report.Covers) != 49 || len(supplied) != 49 {
+		t.Fatalf("calls=%d observed=%d report=%d supplied=%d", calls, observed, len(report.Covers), len(supplied))
+	}
+	if report.InputTokens != 20 || report.OutputTokens != 10 {
+		t.Fatalf("usage not aggregated: %+v", report)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	_ "image/png"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	xdraw "golang.org/x/image/draw"
@@ -105,44 +106,97 @@ func (c *Curator) observe(ctx context.Context, evidence []domain.Evidence, curre
 	for _, e := range evidence {
 		captions = append(captions, caption{e.Book.ID, e.Book.Metadata.Title, e.Book.Metadata.Authors, e.Book.Metadata.SeriesIndex})
 	}
-	data, err := json.Marshal(captions)
+	// A response describing hundreds of covers exhausts the model's output
+	// budget. Bound output per call, while sharing current covers from the whole
+	// attention group as references. Metadata reconciliation still sees every
+	// observation together, so series-wide cover selection stays holistic.
+	const batchSize = 48
+	var overview []coverTile
+	if len(tiles) > batchSize {
+		for _, tile := range tiles {
+			if tile.key.Source == 0 {
+				overview = append(overview, tile)
+			}
+		}
+	}
+	references, err := coverSheets(overview)
 	if err != nil {
 		return report, nil, err
 	}
-	content := []part{{Type: "text", Text: string(data)}}
-	for start := 0; start < len(tiles); start += 12 {
-		end := min(start+12, len(tiles))
-		sheet, err := contactSheet(tiles[start:end])
+	var summaries []string
+	for start := 0; start < len(tiles); start += batchSize {
+		end := min(start+batchSize, len(tiles))
+		batch := tiles[start:end]
+		type target struct {
+			BookID int `json:"bookId"`
+			Source int `json:"source"`
+		}
+		targets := make([]target, 0, len(batch))
+		expected := map[coverKey]bool{}
+		for _, tile := range batch {
+			targets = append(targets, target{tile.key.BookID, tile.key.Source})
+			expected[tile.key] = true
+		}
+		data, err := json.Marshal(struct {
+			Books   []caption `json:"books"`
+			Targets []target  `json:"targets"`
+		}{captions, targets})
 		if err != nil {
 			return report, nil, err
 		}
+		content := []part{{Type: "text", Text: string(data)}}
+		if len(references) > 0 {
+			content = append(content, part{Type: "text", Text: "REFERENCE OVERVIEW: current covers across the entire group. Use to compare families; return observations only for the targets listed above."})
+			content = append(content, references...)
+		}
+		sheets, err := coverSheets(batch)
+		if err != nil {
+			return report, nil, err
+		}
+		if len(references) > 0 {
+			content = append(content, part{Type: "text", Text: "TARGET COVERS: describe each of these tiles exactly once. Use descriptive visual-family names consistent with the reference overview, not batch-local names like set 1."})
+		}
+		content = append(content, sheets...)
+		var observations struct {
+			Summary string                    `json:"summary"`
+			Covers  []domain.CoverObservation `json:"covers"`
+		}
+		reportProgress(ctx, "vision", start, len(tiles))
+		u, err := c.call(ctx, c.visionModel, visionInstructions, content, &observations)
+		if err != nil {
+			return report, nil, fmt.Errorf("vision batch %d/%d: %w", start/batchSize+1, (len(tiles)+batchSize-1)/batchSize, err)
+		}
+		seen := map[coverKey]bool{}
+		for _, observation := range observations.Covers {
+			key := coverKey{observation.BookID, observation.Source}
+			if !expected[key] || seen[key] {
+				return report, nil, fmt.Errorf("vision returned unknown or duplicate cover B%d C%d", observation.BookID, observation.Source)
+			}
+			seen[key] = true
+		}
+		if len(seen) != len(expected) {
+			return report, nil, fmt.Errorf("vision omitted covers: got %d of %d", len(seen), len(expected))
+		}
+		summaries = append(summaries, observations.Summary)
+		report.Covers = append(report.Covers, observations.Covers...)
+		report.InputTokens += u.Input
+		report.OutputTokens += u.Output
+		reportProgress(ctx, "vision", end, len(tiles))
+	}
+	report.Summary = strings.Join(summaries, "\n")
+	return report, supplied, nil
+}
+
+func coverSheets(tiles []coverTile) ([]part, error) {
+	var content []part
+	for start := 0; start < len(tiles); start += 12 {
+		sheet, err := contactSheet(tiles[start:min(start+12, len(tiles))])
+		if err != nil {
+			return nil, err
+		}
 		content = append(content, part{Type: "image_url", ImageURL: &imageURL{URL: "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(sheet)}})
 	}
-	var observations struct {
-		Summary string                    `json:"summary"`
-		Covers  []domain.CoverObservation `json:"covers"`
-	}
-	reportProgress(ctx, "vision", len(tiles), len(tiles))
-	u, err := c.call(ctx, c.visionModel, visionInstructions, content, &observations)
-	if err != nil {
-		return report, nil, err
-	}
-	seen := map[coverKey]bool{}
-	for _, o := range observations.Covers {
-		key := coverKey{o.BookID, o.Source}
-		if !supplied[key] || seen[key] {
-			return report, nil, fmt.Errorf("vision returned unknown or duplicate cover B%d C%d", o.BookID, o.Source)
-		}
-		seen[key] = true
-	}
-	if len(seen) != len(supplied) {
-		return report, nil, fmt.Errorf("vision omitted covers: got %d of %d", len(seen), len(supplied))
-	}
-	report.Summary = observations.Summary
-	report.Covers = observations.Covers
-	report.InputTokens = u.Input
-	report.OutputTokens = u.Output
-	return report, supplied, nil
+	return content, nil
 }
 
 func contactSheet(tiles []coverTile) ([]byte, error) {

@@ -25,7 +25,9 @@ compatibility before upgrading BookOrbit.
    failures retry.
 3. For each discovered group, present labeled contact sheets of current and
    candidate covers to the vision model (default Haiku). It describes visual
-   families, visible text and defects.
+   families, visible text and defects. Calls describe at most 48 target covers;
+   larger groups share an overview of all current covers in every batch. This
+   bounds response size without splitting the final group-wide decision.
 4. Give those observations and source records to the metadata model (default
    Terra). It resolves the actual works and series inside the provisional group,
    selects fields across matching providers and chooses coordinated covers for
