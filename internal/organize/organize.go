@@ -704,7 +704,15 @@ func (o *Organizer) Organize(ctx context.Context, book domain.Book) (result Resu
 		if e != nil {
 			return result, e
 		}
-		if _, err = tx.ExecContext(ctx, `UPDATE book_files SET book_id=$1,absolute_path=$2,rel_path=$3,ino=NULL,updated_at=now() WHERE id=$4`, base.book.ID, m.To, filepath.ToSlash(rel), m.ID); err != nil {
+		info, e := os.Stat(m.To)
+		if e != nil {
+			return result, e
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok {
+			return result, errors.New("filesystem inode unavailable")
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE book_files SET book_id=$1,absolute_path=$2,rel_path=$3,ino=$4,updated_at=now() WHERE id=$5`, base.book.ID, m.To, filepath.ToSlash(rel), strconv.FormatUint(stat.Ino, 10), m.ID); err != nil {
 			return
 		}
 	}

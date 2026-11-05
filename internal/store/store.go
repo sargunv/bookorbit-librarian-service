@@ -192,3 +192,28 @@ func (s *Store) Counts(ctx context.Context) (map[string]int, error) {
 	}
 	return out, rows.Err()
 }
+
+// SaveGroup commits the whole series plan before any volume is edited. Sibling
+// jobs reuse it, so individual volumes cannot independently choose cover sets.
+func (s *Store) SaveGroup(ctx context.Context, proposals []domain.Proposal) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, p := range proposals {
+		data, err := json.Marshal(p)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO jobs(book_id,policy,proposal) VALUES(?,?,?) ON CONFLICT(book_id,policy) DO NOTHING`, p.Book.ID, p.PolicyVersion, string(data)); err != nil {
+			return err
+		}
+		// A new volume can justify changing an already curated sibling's cover.
+		changed := len(p.Patch) > 0 || p.CoverURL != ""
+		if _, err = tx.ExecContext(ctx, `UPDATE jobs SET proposal=?,attempts=CASE WHEN status='applied' AND ? THEN 0 ELSE attempts END,status=CASE WHEN status='applied' AND ? THEN 'pending' ELSE status END,available_at=0,error='',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE book_id=? AND policy=? AND (proposal IS NULL OR status='applied')`, string(data), changed, changed, p.Book.ID, p.PolicyVersion); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}

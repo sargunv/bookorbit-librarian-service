@@ -12,7 +12,7 @@ import (
 
 type Config struct {
 	Listen, StatePath, AdminToken, BookOrbitURL, BookOrbitToken string
-	ModelURL, ModelKey, PrimaryModel, FallbackModel             string
+	ModelURL, ModelKey, VisionModel, MetadataModel              string
 	LibraryRoot, OriginalsRoot, PostgresDSN                     string
 	Providers                                                   []string
 	LibraryID, Workers, MaxAttempts                             int
@@ -21,7 +21,7 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	c := Config{Listen: value("LISTEN_ADDR", ":8080"), StatePath: value("STATE_PATH", "/data/librarian.db"), AdminToken: os.Getenv("ADMIN_TOKEN"), BookOrbitURL: os.Getenv("BOOKORBIT_URL"), BookOrbitToken: os.Getenv("BOOKORBIT_MAGIC_LINK_TOKEN"), ModelURL: os.Getenv("MODEL_BASE_URL"), ModelKey: os.Getenv("MODEL_API_KEY"), PrimaryModel: value("MODEL_PRIMARY", "claude/haiku-5-5"), FallbackModel: os.Getenv("MODEL_FALLBACK"), LibraryRoot: os.Getenv("LIBRARY_ROOT"), OriginalsRoot: os.Getenv("ORIGINALS_ROOT"), PostgresDSN: os.Getenv("BOOKORBIT_DATABASE_URL"), Providers: strings.Split(value("METADATA_PROVIDERS", "hardcover,goodreads"), ",")}
+	c := Config{Listen: value("LISTEN_ADDR", ":8080"), StatePath: value("STATE_PATH", "/data/librarian.db"), AdminToken: os.Getenv("ADMIN_TOKEN"), BookOrbitURL: os.Getenv("BOOKORBIT_URL"), BookOrbitToken: os.Getenv("BOOKORBIT_MAGIC_LINK_TOKEN"), ModelURL: os.Getenv("MODEL_BASE_URL"), ModelKey: os.Getenv("MODEL_API_KEY"), VisionModel: value("MODEL_VISION", "claude/haiku-5-5"), MetadataModel: value("MODEL_METADATA", "chatgpt/gpt-6.1-terra"), LibraryRoot: os.Getenv("LIBRARY_ROOT"), OriginalsRoot: os.Getenv("ORIGINALS_ROOT"), PostgresDSN: os.Getenv("BOOKORBIT_DATABASE_URL"), Providers: strings.Split(value("METADATA_PROVIDERS", "hardcover,goodreads"), ",")}
 	var err error
 	for _, v := range []struct {
 		name     string
@@ -50,7 +50,7 @@ func Load() (Config, error) {
 	if err != nil || c.PollInterval < time.Minute {
 		return c, errors.New("DISCOVERY_INTERVAL must be at least 1m")
 	}
-	c.JobTimeout, err = time.ParseDuration(value("JOB_TIMEOUT", "8m"))
+	c.JobTimeout, err = time.ParseDuration(value("JOB_TIMEOUT", "20m"))
 	if err != nil || c.JobTimeout < time.Minute || c.JobTimeout > 30*time.Minute {
 		return c, errors.New("JOB_TIMEOUT must be between 1m and 30m")
 	}

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +30,7 @@ type Service struct {
 	organizer *organize.Organizer
 	paused    atomic.Bool
 	applyMu   sync.Mutex
+	planMu    sync.Mutex
 	wg        sync.WaitGroup
 }
 
@@ -48,7 +48,7 @@ func New(c config.Config) (*Service, error) {
 		_ = db.Close()
 		return nil, e
 	}
-	judge := curator.New(c.ModelURL, c.ModelKey, c.PrimaryModel, c.FallbackModel)
+	judge := curator.New(c.ModelURL, c.ModelKey, c.VisionModel, c.MetadataModel)
 	judge.SetRequestInterval(c.ModelInterval)
 	return &Service{cfg: c, db: db, books: bookorbit.New(c.BookOrbitURL, c.BookOrbitToken), judge: judge, organizer: org}, nil
 }
@@ -156,34 +156,52 @@ func (s *Service) process(ctx context.Context, j store.Job) (string, error) {
 	}
 	p := j.Proposal
 	if p == nil {
-		candidates, e := s.books.Search(ctx, book, s.cfg.Providers)
-		var warnings []string
-		if e != nil {
-			var partial *bookorbit.SearchError
-			if len(candidates) == 0 || !errors.As(e, &partial) {
-				return "", e
+		s.planMu.Lock()
+		saved, err := s.db.Get(ctx, j.ID)
+		if err == nil && saved.Proposal != nil {
+			p = saved.Proposal
+		} else if err == nil {
+			members, x := s.books.Series(ctx, book)
+			if x == nil {
+				evidence := make([]domain.Evidence, 0, len(members))
+				for _, member := range members {
+					candidates, searchErr := s.books.Search(ctx, member, s.cfg.Providers)
+					var warnings []string
+					if searchErr != nil {
+						var partial *bookorbit.SearchError
+						if len(candidates) == 0 || !errors.As(searchErr, &partial) {
+							x = searchErr
+							break
+						}
+						warnings = append(warnings, partial.Error())
+					}
+					evidence = append(evidence, domain.Evidence{Book: member, Candidates: candidates, Warnings: warnings})
+				}
+				if x == nil {
+					proposals, planErr := s.judge.Plan(ctx, evidence, s.books.CoverImage)
+					x = planErr
+					if x == nil {
+						x = s.db.SaveGroup(ctx, proposals)
+						for i := range proposals {
+							if proposals[i].Book.ID == j.BookID {
+								p = &proposals[i]
+							}
+						}
+					}
+				}
 			}
-			warnings = append(warnings, partial.Error())
+			err = x
 		}
-		if len(candidates) == 0 {
-			return s.finish(ctx, j, "review", "no source candidates found", nil)
+		s.planMu.Unlock()
+		if err != nil {
+			return "", err
 		}
-		decision, e := s.judge.Judge(ctx, book, candidates)
-		if e != nil {
-			return "", e
-		}
-		proposal, e := curator.BuildProposal(book, candidates, decision)
-		if e != nil {
-			return "", e
-		}
-		p = &proposal
-		p.Warnings = warnings
-		if e = s.db.Proposal(ctx, j.ID, *p); e != nil {
-			return "", e
+		if p == nil {
+			return "", errors.New("series plan omitted current book")
 		}
 	}
-	if p.Decision.NeedsReview || p.Decision.Match == 0 || !p.Decision.SameWork {
-		return s.finish(ctx, j, "review", p.Decision.Reason, nil)
+	if p.Decision.Match == 0 {
+		return s.finish(ctx, j, "skipped", p.Decision.Reason, nil)
 	}
 	if !s.cfg.AutoApply {
 		return s.finish(ctx, j, "planned", "", nil)
@@ -195,14 +213,18 @@ func (s *Service) process(ctx context.Context, j store.Job) (string, error) {
 	if e != nil {
 		return "", e
 	}
-	already := patchMatches(current, p.Patch)
-	if !already && !reflect.DeepEqual(current.Metadata, p.Book.Metadata) {
-		return s.finish(ctx, j, "review", "metadata changed after evidence was gathered", nil)
+	// Rebuild against the fresh record on retries: BookOrbit normalizes some
+	// fields while writing, and those own changes must not create review holds.
+	refreshed, err := curator.BuildProposal(current, p.Candidates, p.Decision)
+	if err != nil {
+		return "", err
 	}
+	p.Patch = refreshed.Patch
+	p.CoverURL = refreshed.CoverURL
 	if e = s.organizer.Backup(ctx, current); e != nil {
 		return "", e
 	}
-	if !already && len(p.Patch) > 0 {
+	if len(p.Patch) > 0 {
 		if e = s.books.Apply(ctx, j.BookID, p.Patch); e != nil {
 			return "", e
 		}
@@ -244,36 +266,6 @@ func (s *Service) process(ctx context.Context, j store.Job) (string, error) {
 	return s.finish(ctx, j, "applied", "", result)
 }
 
-func patchMatches(b domain.Book, p domain.Patch) bool {
-	data, e := json.Marshal(b.Metadata)
-	if e != nil {
-		return false
-	}
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(data, &fields) != nil {
-		return false
-	}
-	ids := map[string]string{"hardcover": "hardcoverId", "google": "googleBooksId", "goodreads": "goodreadsId", "amazon": "amazonId", "openLibrary": "openLibraryId", "itunes": "itunesId", "comicvine": "comicvineId", "kobo": "koboId"}
-	for provider, key := range ids {
-		if v := b.ProviderIDs[provider]; v != "" {
-			fields[key], _ = json.Marshal(v)
-		}
-	}
-	if b.HardcoverEditionID != "" {
-		fields["hardcoverEditionId"], _ = json.Marshal(b.HardcoverEditionID)
-	}
-	for k, v := range p {
-		var a, c json.RawMessage
-		if json.Unmarshal(v, &a) != nil || json.Unmarshal(fields[k], &c) != nil {
-			return false
-		}
-		if string(a) != string(c) {
-			return false
-		}
-	}
-	return true
-}
-
 func (s *Service) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -295,11 +287,11 @@ func (s *Service) Handler() http.Handler {
 			return
 		}
 		writeJSON(w, 200, struct {
-			Counts                              map[string]int `json:"jobs"`
-			Paused                              bool           `json:"paused"`
-			Policy, PrimaryModel, FallbackModel string
-			AutoApply, Organize                 bool
-		}{counts, s.paused.Load(), curator.PolicyVersion, s.cfg.PrimaryModel, s.cfg.FallbackModel, s.cfg.AutoApply, s.cfg.Organize})
+			Counts                             map[string]int `json:"jobs"`
+			Paused                             bool           `json:"paused"`
+			Policy, VisionModel, MetadataModel string
+			AutoApply, Organize                bool
+		}{counts, s.paused.Load(), curator.PolicyVersion, s.cfg.VisionModel, s.cfg.MetadataModel, s.cfg.AutoApply, s.cfg.Organize})
 	})
 	private.HandleFunc("POST /v1/pause", func(w http.ResponseWriter, r *http.Request) {
 		s.paused.Store(true)

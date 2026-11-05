@@ -53,15 +53,15 @@ type Candidate struct {
 
 // Decision references candidates by one-based index. Zero preserves an existing field.
 type Decision struct {
-	Match        int            `json:"match"`
-	SameWork     bool           `json:"sameWork"`
-	SameEdition  bool           `json:"sameEdition"`
-	NeedsReview  bool           `json:"needsReview"`
-	Reason       string         `json:"reason"`
-	FieldSources map[string]int `json:"fieldSources"`
-	Model        string         `json:"model,omitempty"`
-	InputTokens  int            `json:"inputTokens,omitempty"`
-	OutputTokens int            `json:"outputTokens,omitempty"`
+	Match          int            `json:"match"`
+	Reason         string         `json:"reason"`
+	FieldSources   map[string]int `json:"fieldSources"`
+	WorkSources    []int          `json:"workSources,omitempty"`
+	EditionSources []int          `json:"editionSources,omitempty"`
+	CoverSource    int            `json:"coverSource"`
+	Model          string         `json:"model,omitempty"`
+	InputTokens    int            `json:"inputTokens,omitempty"`
+	OutputTokens   int            `json:"outputTokens,omitempty"`
 }
 
 type Patch map[string]json.RawMessage
@@ -75,4 +75,29 @@ type Proposal struct {
 	Provenance    map[string]string `json:"provenance"`
 	PolicyVersion string            `json:"policyVersion"`
 	Warnings      []string          `json:"warnings,omitempty"`
+	SeriesReason  string            `json:"seriesReason,omitempty"`
+	Visual        *VisualReport     `json:"visual,omitempty"`
+}
+
+// Evidence is one volume's source material within a series plan.
+type Evidence struct {
+	Book       Book        `json:"book"`
+	Candidates []Candidate `json:"candidates"`
+	Warnings   []string    `json:"warnings,omitempty"`
+}
+
+type CoverObservation struct {
+	BookID      int      `json:"bookId"`
+	Source      int      `json:"source"`
+	Family      string   `json:"family"`
+	VisibleText string   `json:"visibleText"`
+	Issues      []string `json:"issues"`
+}
+
+type VisualReport struct {
+	Model        string             `json:"model"`
+	Summary      string             `json:"summary"`
+	Covers       []CoverObservation `json:"covers"`
+	InputTokens  int                `json:"inputTokens"`
+	OutputTokens int                `json:"outputTokens"`
 }

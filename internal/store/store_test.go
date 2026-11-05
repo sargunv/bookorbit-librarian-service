@@ -90,3 +90,39 @@ func TestRetryExhaustionAndExplicitRequeue(t *testing.T) {
 		t.Fatal("active job was reset")
 	}
 }
+
+func TestSaveWholeSeriesAndReuseSiblingPlan(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if _, err = s.Enqueue(ctx, []int{1}, "2"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.Claim(ctx, time.Minute, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposals := []domain.Proposal{{Book: domain.Book{ID: 1}, PolicyVersion: "2", SeriesReason: "shared"}, {Book: domain.Book{ID: 2}, PolicyVersion: "2", SeriesReason: "shared"}}
+	if err = s.SaveGroup(ctx, proposals); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.Get(ctx, first.ID)
+	if err != nil || saved.Status != "running" || saved.Proposal == nil {
+		t.Fatalf("active plan: %+v %v", saved, err)
+	}
+	sibling, err := s.Claim(ctx, time.Minute, 3)
+	if err != nil || sibling.BookID != 2 || sibling.Proposal == nil || sibling.Proposal.SeriesReason != "shared" {
+		t.Fatalf("sibling: %+v %v", sibling, err)
+	}
+	proposals[1].SeriesReason = "another plan"
+	if err = s.SaveGroup(ctx, proposals); err != nil {
+		t.Fatal(err)
+	}
+	saved, err = s.Get(ctx, sibling.ID)
+	if err != nil || saved.Proposal.SeriesReason != "shared" {
+		t.Fatal("overwrote in-flight sibling plan")
+	}
+}

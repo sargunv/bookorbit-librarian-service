@@ -1,14 +1,12 @@
 package service
 
 import (
-	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sargunv/bookorbit-librarian-service/internal/config"
-	"github.com/sargunv/bookorbit-librarian-service/internal/domain"
 )
 
 func TestOperationsRequireAuthentication(t *testing.T) {
@@ -42,17 +40,5 @@ func TestOperationsRequireAuthentication(t *testing.T) {
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != 200 {
 		t.Fatal(w.Code)
-	}
-}
-
-func TestAppliedProjectionAllowsCrashResumeButDetectsOtherChanges(t *testing.T) {
-	b := domain.Book{Metadata: domain.Metadata{Title: "Dune"}, ProviderIDs: map[string]string{"hardcover": "42"}}
-	p := domain.Patch{"title": json.RawMessage(`"Dune"`), "hardcoverId": json.RawMessage(`"42"`)}
-	if !patchMatches(b, p) {
-		t.Fatal("applied projection not recognized")
-	}
-	b.Metadata.Title = "A different book"
-	if patchMatches(b, p) {
-		t.Fatal("conflicting edit accepted")
 	}
 }

@@ -13,30 +13,40 @@ compatibility before upgrading BookOrbit.
 
 ## How it works
 
-1. Discover book IDs through the BookOrbit API and enqueue durable SQLite jobs.
-   Each book is processed once per policy version; discovery does not repeatedly
-   charge for completed or review-marked books.
-2. Search configured providers, with the current title, authors, ISBN and book
-   ID. Successful evidence from a partial provider failure remains usable, with
-   a warning attached to the proposal. Complete search failures retry.
-3. Ask the primary model to select a matching record and fields. Ambiguity and
-   contradictory selections can escalate to a configured fallback. Unresolved
-   identities enter `review`.
-4. Persist the candidates, decision, token usage, field provenance and proposed
-   patch before applying changes. Models select evidence; they cannot supply new
-   bibliographic facts. The first version selects fields from one matched
-   record.
-5. Save original files with SHA-256 hashes and a metadata manifest, outside the
-   scanned library. Respect locked fields and preserve edition fields unless the
-   model finds evidence for the specific edition.
-6. Apply metadata and covers through BookOrbit and use its file writer.
-   Optionally organize files and catalog paths together using a recovery
-   journal.
+1. Discover books and enqueue durable SQLite jobs. The planning unit is a whole
+   series; a standalone book is a group of one. Series membership comes from
+   BookOrbit's current series field within the configured library.
+2. Search BookOrbit's configured providers for each volume. Partial provider
+   results remain usable with a warning; complete search failures retry.
+3. Present labeled contact sheets of current and candidate covers to the vision
+   model (default Haiku). It describes visual families, visible text and
+   defects.
+4. Give those observations and source records to the metadata model (default
+   Terra). It reconciles identities, selects fields across matching providers
+   and chooses a coordinated set of actual covers. Both tasks run for every
+   group with images; there is no confidence or review ladder.
+5. Save the entire series plan in one SQLite transaction before any edits.
+   Sibling jobs reuse it. Each field records its provider; edition fields
+   require explicit edition evidence. Locked fields and good current values are
+   kept.
+6. Back up originals outside the scanned library, apply metadata and covers
+   through BookOrbit, write into the book files, then organize files and catalog
+   paths using a recovery journal.
 
-The service sends bibliographic metadata and basenames to the configured model
-endpoint, not book contents or full filesystem paths. Source descriptions and
-filenames are treated as untrusted evidence. Decisions are probabilistic; the
-recorded evidence and originals make them inspectable and reversible.
+The service sends bibliographic metadata, basenames and cover contact sheets to
+its model endpoint. It does not send book contents or full filesystem paths.
+Models select supplied evidence, not new bibliographic facts or invented cover
+art. If no suitable coordinated family exists, appropriate current covers can
+remain. Translations, guides and omnibuses are considered on their own merits.
+
+The role split was informed by a small live comparison on identical library
+examples: both models recognized the same cover family, but Haiku proposed
+artwork that wasn't supplied and made an inconsistent edition selection. Terra
+kept the edition uncertain and distinguished visible evidence from catalog
+claims. This is a concrete design observation, not a broad accuracy benchmark.
+The old Polished collection is useful context, not a gold-standard evaluation
+set. Saved source records, visual observations and decisions make the results
+inspectable; original files remain available for rollback.
 
 ## Run
 
@@ -74,29 +84,29 @@ for OCI health.
 
 ## Configuration
 
-| Variable                          | Meaning / default                                                      |
-| --------------------------------- | ---------------------------------------------------------------------- |
-| `ADMIN_TOKEN`                     | Required, at least 24 characters; bearer token for operations          |
-| `BOOKORBIT_URL`                   | Required HTTP(S) base URL, with optional `/api/v1` suffix              |
-| `BOOKORBIT_MAGIC_LINK_TOKEN`      | Required opaque application login token                                |
-| `MODEL_BASE_URL`, `MODEL_API_KEY` | Required OpenAI chat completions endpoint and key                      |
-| `MODEL_PRIMARY`                   | `claude/haiku-5-5`; use a name supported by your proxy                 |
-| `MODEL_REQUEST_INTERVAL`          | `7s` between primary/fallback requests across workers; range `0s`–`1m` |
-| `MODEL_FALLBACK`                  | Optional model used for ambiguity or invalid primary selections        |
-| `METADATA_PROVIDERS`              | `hardcover,goodreads`; provider keys already configured in BookOrbit   |
-| `LIBRARY_ID`                      | `1`                                                                    |
-| `LIBRARY_ROOT`                    | Required absolute library root, matching BookOrbit paths               |
-| `ORIGINALS_ROOT`                  | Required non-overlapping backup directory outside the scanned root     |
-| `BOOKORBIT_DATABASE_URL`          | Required only for file organization                                    |
-| `STATE_PATH`                      | `/data/librarian.db`                                                   |
-| `LISTEN_ADDR`                     | `:8080`                                                                |
-| `WORKERS`                         | `1`, maximum `4`; applying changes is serialized                       |
-| `MAX_ATTEMPTS`                    | `3`; automatic retries preserve saved proposals                        |
-| `JOB_TIMEOUT`                     | `8m`, allowed range `1m`–`30m`                                         |
-| `AUTO_APPLY`                      | `false`; otherwise safe proposals finish as `planned`                  |
-| `ORGANIZE_FILES`                  | `false`                                                                |
-| `AUTO_DISCOVER`                   | `false`; discover on startup and periodically when enabled             |
-| `DISCOVERY_INTERVAL`              | `1h`, minimum `1m`                                                     |
+| Variable                          | Meaning / default                                                    |
+| --------------------------------- | -------------------------------------------------------------------- |
+| `ADMIN_TOKEN`                     | Required, at least 24 characters; bearer token for operations        |
+| `BOOKORBIT_URL`                   | Required HTTP(S) base URL, with optional `/api/v1` suffix            |
+| `BOOKORBIT_MAGIC_LINK_TOKEN`      | Required opaque application login token                              |
+| `MODEL_BASE_URL`, `MODEL_API_KEY` | Required OpenAI chat completions endpoint and key                    |
+| `MODEL_VISION`                    | `claude/haiku-5-5`; use a name supported by your proxy               |
+| `MODEL_REQUEST_INTERVAL`          | `7s` between model requests across workers; range `0s`–`1m`          |
+| `MODEL_METADATA`                  | `chatgpt/gpt-6.1-terra`; reconciles sources and chooses covers       |
+| `METADATA_PROVIDERS`              | `hardcover,goodreads`; provider keys already configured in BookOrbit |
+| `LIBRARY_ID`                      | `1`                                                                  |
+| `LIBRARY_ROOT`                    | Required absolute library root, matching BookOrbit paths             |
+| `ORIGINALS_ROOT`                  | Required non-overlapping backup directory outside the scanned root   |
+| `BOOKORBIT_DATABASE_URL`          | Required only for file organization                                  |
+| `STATE_PATH`                      | `/data/librarian.db`                                                 |
+| `LISTEN_ADDR`                     | `:8080`                                                              |
+| `WORKERS`                         | `1`, maximum `4`; applying changes is serialized                     |
+| `MAX_ATTEMPTS`                    | `3`; automatic retries preserve saved proposals                      |
+| `JOB_TIMEOUT`                     | `20m`, allowed range `1m`–`30m`                                      |
+| `AUTO_APPLY`                      | `false`; otherwise proposals finish as `planned`                     |
+| `ORGANIZE_FILES`                  | `false`                                                              |
+| `AUTO_DISCOVER`                   | `false`; discover on startup and periodically when enabled           |
+| `DISCOVERY_INTERVAL`              | `1h`, minimum `1m`                                                   |
 
 Use a dedicated shared BookOrbit account with library editor access and
 `library_edit_metadata` and `library_download` permissions. The client exchanges
@@ -119,7 +129,7 @@ arguments:
 podman exec homelab-bookorbit-librarian /librarian request GET /v1/status
 podman exec homelab-bookorbit-librarian /librarian request POST /v1/jobs '{"bookIds":[42,43]}'
 podman exec homelab-bookorbit-librarian /librarian request POST /v1/jobs '{}'
-podman exec homelab-bookorbit-librarian /librarian request GET '/v1/jobs?status=review'
+podman exec homelab-bookorbit-librarian /librarian request GET '/v1/jobs?status=failed'
 podman exec homelab-bookorbit-librarian /librarian request GET /v1/jobs/1
 podman exec homelab-bookorbit-librarian /librarian request POST /v1/jobs/1/retry
 podman exec homelab-bookorbit-librarian /librarian request POST /v1/pause
@@ -134,12 +144,11 @@ configured library; `{"limit":10}` bounds discovery. Listing returns the latest
 100 jobs, optionally filtered by status. Retrieve a job to inspect its complete
 proposal and resulting moves/merges. There is no web UI or manual patch editor.
 
-States are `pending`, `running`, `review`, `planned`, `applied`, `failed`, and
-`skipped`. Expired leases recover after interruption. Explicit retries of
-failed, review or planned jobs gather fresh evidence; automatic retries reuse
-saved proposals. Pause stops claiming jobs and discovery after current work; it
-is in memory and resets on restart. Stop the unit for a durable maintenance
-pause.
+States are `pending`, `running`, `planned`, `applied`, `failed`, and `skipped`.
+Expired leases recover after interruption. Explicit retries of failed or planned
+jobs gather fresh evidence; automatic retries reuse saved proposals. Pause stops
+claiming jobs and discovery after current work; it is in memory and resets on
+restart. Stop the unit for a durable maintenance pause.
 
 ## File organization and recovery
 
@@ -193,7 +202,8 @@ completion.
 
 `mise run fix` applies formatting and lint fixes. `mise run check` checks
 formatting, module tidiness and lint; `mise run test` runs tests with the race
-detector. Fixtures cover API wire formats and auth, evidence/edition gates,
-backups, paths, collisions, lease recovery and authenticated operations. There
-is no external service access in these tests. Deployment requires a small
-real-book exercise against the exact BookOrbit version and filesystem.
+detector. Fixtures cover API wire formats and auth, series plan reuse, visual
+inputs, field/edition sources, backups, paths, collisions, lease recovery and
+authenticated operations. There is no external service access in these tests.
+Deployment requires a small real-book exercise against the exact BookOrbit
+version and filesystem.
