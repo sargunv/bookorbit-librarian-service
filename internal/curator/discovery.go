@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/sargunv/bookorbit-librarian-service/internal/domain"
 )
@@ -52,24 +53,84 @@ func (c *Curator) Discover(ctx context.Context, books []domain.Book) (domain.Dis
 	if err != nil {
 		return domain.Discovery{}, err
 	}
-	expected := map[int]bool{}
+
+	groups, warnings, err := normalizeGroups(result.Groups, books)
+	if err != nil {
+		return domain.Discovery{}, err
+	}
+	return domain.Discovery{Groups: groups, Warnings: warnings, Model: c.metadataModel, InputTokens: u.Input, OutputTokens: u.Output}, nil
+}
+
+// Model IDs refer to existing records only. Preserve useful relationships from
+// a large response even if a few IDs are mistyped or omitted. Overlap means
+// editorial attention should include both proposed groups.
+func normalizeGroups(proposed []domain.Group, books []domain.Book) ([]domain.Group, []string, error) {
+	parent := map[int]int{}
 	for _, b := range books {
-		expected[b.ID] = true
+		parent[b.ID] = b.ID
+	}
+	find := func(id int) int {
+		for parent[id] != id {
+			parent[id] = parent[parent[id]]
+			id = parent[id]
+		}
+		return id
 	}
 	seen := map[int]bool{}
-	for _, g := range result.Groups {
-		if len(g.BookIDs) == 0 {
-			return domain.Discovery{}, errors.New("discovery returned an empty group")
-		}
+	unknown := map[int]bool{}
+	for _, g := range proposed {
+		first := 0
 		for _, id := range g.BookIDs {
-			if !expected[id] || seen[id] {
-				return domain.Discovery{}, fmt.Errorf("discovery returned unknown or duplicate book %d", id)
+			if _, ok := parent[id]; !ok {
+				unknown[id] = true
+				continue
 			}
 			seen[id] = true
+			if first == 0 {
+				first = id
+			} else {
+				parent[find(id)] = find(first)
+			}
 		}
 	}
-	if len(seen) != len(expected) {
-		return domain.Discovery{}, fmt.Errorf("discovery omitted books: got %d of %d", len(seen), len(expected))
+	if len(seen) == 0 && len(books) > 0 {
+		return nil, nil, errors.New("discovery returned no existing book IDs")
 	}
-	return domain.Discovery{Groups: result.Groups, Model: c.metadataModel, InputTokens: u.Input, OutputTokens: u.Output}, nil
+	reasons := map[int][]string{}
+	for _, g := range proposed {
+		for _, id := range g.BookIDs {
+			if _, ok := parent[id]; !ok {
+				continue
+			}
+			root := find(id)
+			if g.Reason != "" && !slices.Contains(reasons[root], g.Reason) {
+				reasons[root] = append(reasons[root], g.Reason)
+			}
+			break
+		}
+	}
+	groups := []domain.Group{}
+	index := map[int]int{}
+	for _, b := range books {
+		root := find(b.ID)
+		i, ok := index[root]
+		if !ok {
+			i = len(groups)
+			index[root] = i
+			reason := strings.Join(reasons[root], "; ")
+			if !seen[b.ID] {
+				reason = "No relationship proposed; retained as an individual entry."
+			}
+			groups = append(groups, domain.Group{Reason: reason})
+		}
+		groups[i].BookIDs = append(groups[i].BookIDs, b.ID)
+	}
+	var warnings []string
+	if len(unknown) > 0 {
+		warnings = append(warnings, fmt.Sprintf("Ignored %d unknown book IDs from discovery", len(unknown)))
+	}
+	if missing := len(books) - len(seen); missing > 0 {
+		warnings = append(warnings, fmt.Sprintf("Kept %d unassigned books as individual entries", missing))
+	}
+	return groups, warnings, nil
 }

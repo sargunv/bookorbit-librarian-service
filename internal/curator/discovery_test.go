@@ -51,15 +51,16 @@ func TestDiscoverUsesWholeInventoryWithoutSeriesKey(t *testing.T) {
 	}
 }
 
-func TestDiscoveryRejectsMissingOrRepeatedRecords(t *testing.T) {
-	for _, reply := range []string{`{"groups":[{"bookIds":[1]}]}`, `{"groups":[{"bookIds":[1,1,2]}]}`} {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"content":%q},"finish_reason":"stop"}]}`, reply)
-		}))
-		_, err := New(server.URL, "key", "haiku", "terra").Discover(context.Background(), []domain.Book{{ID: 1}, {ID: 2}})
-		server.Close()
-		if err == nil {
-			t.Fatalf("accepted incomplete or repeated inventory: %s", reply)
+func TestDiscoveryKeepsRealRecordsAfterTyposAndOverlaps(t *testing.T) {
+	groups, warnings, err := normalizeGroups([]domain.Group{{BookIDs: []int{1, 5701}, Reason: "first"}, {BookIDs: []int{1, 2}, Reason: "related"}}, []domain.Book{{ID: 1}, {ID: 2}, {ID: 3}})
+	if err != nil || len(groups) != 2 || len(groups[0].BookIDs) != 2 || groups[1].BookIDs[0] != 3 || len(warnings) != 2 {
+		t.Fatalf("groups: %+v warnings: %+v error: %v", groups, warnings, err)
+	}
+	for _, g := range groups {
+		for _, id := range g.BookIDs {
+			if id == 5701 {
+				t.Fatal("invented ID survived")
+			}
 		}
 	}
 }

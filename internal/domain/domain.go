@@ -105,10 +105,11 @@ type VisualReport struct {
 // Discovery groups records for editorial attention, without asserting that their
 // current metadata is correct or that every member belongs to one series.
 type Discovery struct {
-	Groups       []Group `json:"groups"`
-	Model        string  `json:"model,omitempty"`
-	InputTokens  int     `json:"inputTokens,omitempty"`
-	OutputTokens int     `json:"outputTokens,omitempty"`
+	Warnings     []string `json:"warnings,omitempty"`
+	Groups       []Group  `json:"groups"`
+	Model        string   `json:"model,omitempty"`
+	InputTokens  int      `json:"inputTokens,omitempty"`
+	OutputTokens int      `json:"outputTokens,omitempty"`
 }
 
 type Group struct {
