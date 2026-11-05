@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Librarian’s notebook · BookOrbit</title>
+    <title>BookOrbit Librarian · Activity</title>
     <link rel="stylesheet" href="/assets/activity.css" />
     <script src="/assets/activity.js" defer></script>
   </head>
@@ -20,23 +20,21 @@
     </header>
     <main>
       <div class="heading">
-        <h1>The librarian’s notebook</h1>
-        <p>
-          What’s changed, what’s been kept, and the decisions along the way.
-        </p>
+        <h1>Activity</h1>
+        <p>Worker status, metadata changes and sources.</p>
       </div>
       <div class="layout">
         <aside class="status" aria-label="Worker progress">
           <div class="status-heading">
             <span class="signal {{if .Paused}}paused{{end}}"></span>
             <h2>
-              {{if .Paused}}Worker paused{{else if .Counts.running}}At
-              work{{else}}Between books{{end}}
+              {{if .Paused}}Worker paused{{else if
+              .Counts.running}}Running{{else}}Idle{{end}}
             </h2>
           </div>
           {{range .Active}}
-          <div class="on-desk">
-            <p class="subheading">On the desk</p>
+          <div class="current-job">
+            <p class="subheading">Current job</p>
             <h3>{{if .Title}}{{.Title}}{{else}}Book {{.BookID}}{{end}}</h3>
             <p class="stage">{{.Message}}</p>
             <p class="timestamp" data-time="{{.CreatedAt}}">
@@ -85,24 +83,21 @@
         <div class="stream">
           <section class="digest" aria-labelledby="digest-heading">
             <div class="section-heading">
-              <h2 id="digest-heading">From the notebook</h2>
+              <h2 id="digest-heading">Change log</h2>
               <span class="annotation">LLM summaries</span>
             </div>
             {{if .SummaryError}}
             <p class="notice">{{.SummaryError}}</p>
-            {{end}} {{range $i,$summary:=.Summaries}}
-            <article class="summary {{if $i}}previous-summary{{end}}">
+            {{end}} {{range .Summaries}}
+            <article class="summary">
               <p class="timestamp" data-time="{{.CreatedAt}}">
                 {{when .CreatedAt}}
               </p>
-              <h3>{{.Title}}</h3>
               {{if .ThroughAt}}
               <p class="timestamp">
                 Activity through
                 <span data-time="{{.ThroughAt}}">{{when .ThroughAt}}</span>
               </p>
-              {{end}} {{range .Paragraphs}}
-              <p>{{.}}</p>
               {{end}}{{if .Highlights}}
               <ul class="highlights">
                 {{range .Highlights}}
@@ -122,7 +117,7 @@
             </article>
             {{else}}
             <div class="empty">
-              <h3>The first notes are on their way.</h3>
+              <h3>No summaries yet.</h3>
               <p>
                 A summary is written from recorded activity every few minutes.
                 Individual entries appear below as books are processed.
@@ -132,7 +127,7 @@
           </section>
           <section aria-labelledby="activity-heading">
             <div class="section-heading">
-              <h2 id="activity-heading">Activity</h2>
+              <h2 id="activity-heading">Event details</h2>
               <nav>
                 {{if .History}}<a href="/">Current pass</a
                 ><span>All passes</span>{{else}}<span>Current pass</span
@@ -158,7 +153,7 @@
               .Details.Warnings .Details.Error .Details.CoverChanged
               .Details.MovedFiles .Details.MergedBooks}}
               <details>
-                <summary>Read the details</summary>
+                <summary>Details</summary>
                 <div class="entry-details">
                   {{if .Details.GroupReason}}
                   <p>
@@ -169,6 +164,13 @@
                     {{if eq .Kind "planned"}}A cover replacement is selected in
                     the saved plan.{{else}}The selected cover was
                     applied.{{end}}
+                  </p>
+                  {{if .Details.CoverSource}}
+                  <p class="source">Cover source: {{.Details.CoverSource}}</p>
+                  {{end}} {{end}}{{if .Details.Sources}}
+                  <p class="source">
+                    Sources: {{range $i,$source:=.Details.Sources}}{{if $i}},
+                    {{end}}{{$source}}{{end}}
                   </p>
                   {{end}}{{if .Details.MovedFiles}}
                   <p>{{.Details.MovedFiles}} file(s) organized.</p>
@@ -227,7 +229,8 @@
       </div>
     </main>
     <footer>
-      Saved decisions are the record. Summaries are a reading guide.
+      Summaries are generated from saved events. Expand an event for metadata
+      and source details.
     </footer>
   </body>
 </html>

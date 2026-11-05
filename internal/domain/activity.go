@@ -20,6 +20,8 @@ type ActivityDetails struct {
 	Reason       string        `json:"reason,omitempty"`
 	GroupReason  string        `json:"groupReason,omitempty"`
 	CoverChanged bool          `json:"coverChanged,omitempty"`
+	CoverSource  string        `json:"coverSource,omitempty"`
+	Sources      []string      `json:"sources,omitempty"`
 	MovedFiles   int           `json:"movedFiles,omitempty"`
 	MergedBooks  []int         `json:"mergedBooks,omitempty"`
 	Warnings     []string      `json:"warnings,omitempty"`
@@ -39,8 +41,6 @@ type ActivitySummary struct {
 	FromEvent    int64              `json:"fromEvent"`
 	ToEvent      int64              `json:"toEvent"`
 	Policy       string             `json:"policy"`
-	Title        string             `json:"title"`
-	Paragraphs   []string           `json:"paragraphs"`
 	Highlights   []SummaryHighlight `json:"highlights"`
 	Model        string             `json:"model"`
 	InputTokens  int                `json:"inputTokens"`

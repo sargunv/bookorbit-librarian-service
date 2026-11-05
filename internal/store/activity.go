@@ -41,6 +41,23 @@ func eventForJob(j Job, kind, message string) domain.ActivityEvent {
 		e.Details.Reason = p.Decision.Reason
 		e.Details.GroupReason = p.SeriesReason
 		e.Details.Warnings = p.Warnings
+		e.Details.CoverSource = p.Provenance["cover"]
+		sources := map[string]bool{}
+		indices := append([]int{p.Decision.Match}, p.Decision.WorkSources...)
+		indices = append(indices, p.Decision.EditionSources...)
+		for _, index := range indices {
+			if index > 0 && index <= len(p.Candidates) {
+				candidate := p.Candidates[index-1]
+				sources[candidate.Provider+"/"+candidate.ProviderID] = true
+			}
+		}
+		for _, source := range p.Provenance {
+			sources[source] = true
+		}
+		for source := range sources {
+			e.Details.Sources = append(e.Details.Sources, source)
+		}
+		sort.Strings(e.Details.Sources)
 		if kind == "applied" || kind == "planned" {
 			raw, _ := json.Marshal(p.Book.Metadata)
 			before := map[string]json.RawMessage{}

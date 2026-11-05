@@ -52,7 +52,7 @@ func TestSummaryAndHistoricalActivitySurviveRestart(t *testing.T) {
 	if _, err = s.db.Exec(`INSERT INTO jobs(book_id,policy,status)VALUES(1,'test','applied')`); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.SaveSummary(ctx, domain.ActivitySummary{Policy: "test", ToEvent: 1, Title: "A change", Paragraphs: []string{"A book changed."}}); err != nil {
+	if err = s.SaveSummary(ctx, domain.ActivitySummary{Policy: "test", ToEvent: 1, Highlights: []domain.SummaryHighlight{{Text: "A book changed.", EventIDs: []int64{1}}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {

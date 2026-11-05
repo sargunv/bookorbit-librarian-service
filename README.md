@@ -169,12 +169,13 @@ restart. Stop the unit for a durable maintenance pause.
 
 ## Activity page
 
-The optional read-only web page shows cached LLM digests, live worker phases,
-current-pass progress, and expandable entries with before/after metadata, source
-provenance, cover choices, retries and file-operation results. Summary
-highlights link to the underlying events. It refreshes every 30 seconds while
-entries are closed; opening details pauses refresh. All-pass history and older
-entries remain accessible.
+The optional read-only web page shows compact LLM change-log entries, live
+worker phases, current-pass progress, and expandable entries with before/after
+metadata, source provenance, cover choices, retries and file-operation results.
+Each entry states what changed, why and which sources supported it. Entries link
+to the underlying events. It refreshes every 30 seconds while entries are
+closed; opening details pauses refresh. All-pass history and older entries
+remain accessible.
 
 Set `UI_PROXY_TOKEN` to a separate secret of at least 24 characters. Put the
 service behind an authenticating reverse proxy such as Authelia and inject

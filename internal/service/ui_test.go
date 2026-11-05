@@ -20,7 +20,7 @@ func TestUIRequiresSeparateCapabilityAndEscapesModelText(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = svc.Close() }()
-	if err = svc.db.SaveSummary(context.Background(), domain.ActivitySummary{Policy: curator.PolicyVersion, ToEvent: 1, Title: "<script>alert(1)</script>", Paragraphs: []string{"<img src=x onerror=alert(2)>"}}); err != nil {
+	if err = svc.db.SaveSummary(context.Background(), domain.ActivitySummary{Policy: curator.PolicyVersion, ToEvent: 1, Highlights: []domain.SummaryHighlight{{Text: "<script>alert(1)</script><img src=x onerror=alert(2)>"}}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
