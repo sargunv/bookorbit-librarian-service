@@ -79,18 +79,18 @@ func TestSeriesHasFixedVisualAndEditorialTasks(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		if req.Messages[0].Role != "developer" {
-			t.Error("proxy instruction role must be developer")
+		if req.Messages[0].Role != "user" {
+			t.Error("proxy requires user-only messages")
 		}
 		content := ""
 		switch calls {
 		case 1:
-			if req.Model != "haiku" || len(req.Messages[1].Content) != 2 || req.Messages[1].Content[1].ImageURL == nil {
+			if req.Model != "haiku" || len(req.Messages[0].Content) != 3 || req.Messages[0].Content[2].ImageURL == nil {
 				t.Error("vision did not receive contact sheet")
 			}
 			content = `{"summary":"matching blue set", "covers":[{"bookId":1,"source":0,"family":"blue","visibleText":"One","issues":[]},{"bookId":1,"source":1,"family":"blue","visibleText":"One","issues":[]},{"bookId":2,"source":0,"family":"blue","visibleText":"Two","issues":[]},{"bookId":2,"source":1,"family":"blue","visibleText":"Two","issues":[]}]}`
 		case 2:
-			input := req.Messages[1].Content[0].Text
+			input := req.Messages[0].Content[1].Text
 			if req.Model != "terra" || !strings.Contains(input, "matching blue set") || strings.Contains(input, "/private/") {
 				t.Error("editorial input missing observations or contains private paths")
 			}

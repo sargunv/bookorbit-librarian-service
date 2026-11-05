@@ -81,7 +81,7 @@ func (c *Curator) call(ctx context.Context, model, instructions string, content 
 		Model     string    `json:"model"`
 		MaxTokens int       `json:"max_tokens"`
 		Messages  []message `json:"messages"`
-	}{model, 24000, []message{{"developer", []part{{Type: "text", Text: instructions}}}, {"user", content}}}
+	}{model, 24000, []message{{"user", append([]part{{Type: "text", Text: instructions}}, content...)}}}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return u, err
