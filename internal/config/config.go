@@ -11,6 +11,8 @@ import (
 )
 
 type Config struct {
+	UIProxyToken, SummaryModel, BookOrbitPublicURL              string
+	SummaryInterval                                             time.Duration
 	Listen, StatePath, AdminToken, BookOrbitURL, BookOrbitToken string
 	ModelURL, ModelKey, VisionModel, MetadataModel              string
 	LibraryRoot, OriginalsRoot, PostgresDSN                     string
@@ -22,7 +24,23 @@ type Config struct {
 
 func Load() (Config, error) {
 	c := Config{Listen: value("LISTEN_ADDR", ":8080"), StatePath: value("STATE_PATH", "/data/librarian.db"), AdminToken: os.Getenv("ADMIN_TOKEN"), BookOrbitURL: os.Getenv("BOOKORBIT_URL"), BookOrbitToken: os.Getenv("BOOKORBIT_MAGIC_LINK_TOKEN"), ModelURL: os.Getenv("MODEL_BASE_URL"), ModelKey: os.Getenv("MODEL_API_KEY"), VisionModel: value("MODEL_VISION", "claude/haiku-5-5"), MetadataModel: value("MODEL_METADATA", "chatgpt/gpt-6.1-terra"), LibraryRoot: os.Getenv("LIBRARY_ROOT"), OriginalsRoot: os.Getenv("ORIGINALS_ROOT"), PostgresDSN: os.Getenv("BOOKORBIT_DATABASE_URL"), Providers: strings.Split(value("METADATA_PROVIDERS", "hardcover,goodreads"), ",")}
+	c.UIProxyToken = os.Getenv("UI_PROXY_TOKEN")
+	c.SummaryModel = value("MODEL_SUMMARY", c.VisionModel)
+	c.BookOrbitPublicURL = os.Getenv("BOOKORBIT_PUBLIC_URL")
+	if c.UIProxyToken != "" && len(c.UIProxyToken) < 24 {
+		return c, errors.New("UI_PROXY_TOKEN must be at least 24 characters")
+	}
 	var err error
+	c.SummaryInterval, err = time.ParseDuration(value("ACTIVITY_SUMMARY_INTERVAL", "5m"))
+	if err != nil || c.SummaryInterval < time.Minute {
+		return c, errors.New("ACTIVITY_SUMMARY_INTERVAL must be at least 1m")
+	}
+	if c.BookOrbitPublicURL != "" {
+		u, e := url.Parse(c.BookOrbitPublicURL)
+		if e != nil || u.Host == "" || u.User != nil || (u.Scheme != "https" && u.Scheme != "http") {
+			return c, errors.New("BOOKORBIT_PUBLIC_URL must be an HTTP(S) URL without credentials")
+		}
+	}
 	for _, v := range []struct {
 		name     string
 		dst      *int

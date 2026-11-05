@@ -190,6 +190,7 @@ func (c *Curator) Plan(ctx context.Context, evidence []domain.Evidence, currentC
 		Reason string      `json:"reason"`
 		Books  []selection `json:"books"`
 	}
+	reportProgress(ctx, "metadata", len(evidence), len(evidence))
 	u, err := c.call(ctx, c.metadataModel, metadataInstructions, []part{{Type: "text", Text: string(input)}}, &response)
 	if err != nil {
 		return nil, err

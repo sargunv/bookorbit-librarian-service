@@ -19,8 +19,9 @@ yet.
 
 ## Project invariants
 
-- Credentials and real library records never belong in Git or logs. Generic test
-  fixtures only.
+- Credentials and real library records never belong in Git or operational
+  stdout. Generic test fixtures only. The requested private SQLite activity log
+  may contain book titles, metadata changes and decision rationales.
 - A model selects supplied evidence; it cannot manufacture factual metadata or
   identifiers.
 - File organization must stay within the configured library root. Preserve

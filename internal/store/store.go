@@ -43,6 +43,10 @@ func Open(path string) (*Store, error) {
 	s := &Store{db: db}
 	_, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL;
  CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY,book_id INTEGER NOT NULL,policy TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,error TEXT NOT NULL DEFAULT '',proposal TEXT,result TEXT,lease_until INTEGER NOT NULL DEFAULT 0,available_at INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),UNIQUE(book_id,policy));
+ CREATE TABLE IF NOT EXISTS activity(id INTEGER PRIMARY KEY,job_id INTEGER NOT NULL,book_id INTEGER NOT NULL,policy TEXT NOT NULL,kind TEXT NOT NULL,stage TEXT NOT NULL DEFAULT '',title TEXT NOT NULL DEFAULT '',message TEXT NOT NULL DEFAULT '',details TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));
+ CREATE INDEX IF NOT EXISTS activity_policy ON activity(policy,id);
+ CREATE INDEX IF NOT EXISTS activity_job ON activity(job_id,id);
+ CREATE TABLE IF NOT EXISTS activity_summaries(id INTEGER PRIMARY KEY,policy TEXT NOT NULL,to_event INTEGER NOT NULL,summary TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),UNIQUE(policy,to_event));
  CREATE TABLE IF NOT EXISTS discovery(policy TEXT PRIMARY KEY,plan TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS jobs_claim ON jobs(status,available_at,id);`)
 	if err != nil {
@@ -50,6 +54,10 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if err = os.Chmod(path, 0o600); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err = s.backfillActivity(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -123,21 +131,59 @@ func (s *Store) Proposal(ctx context.Context, id int64, p domain.Proposal) error
 }
 
 func (s *Store) Finish(ctx context.Context, id int64, status, message string, result json.RawMessage) error {
-	var r sql.NullString
-	if len(result) > 0 {
-		r = sql.NullString{String: string(result), Valid: true}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	_, e := s.db.ExecContext(ctx, `UPDATE jobs SET status=?,error=?,result=?,lease_until=0,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, status, message, r, id)
-	return e
+	defer func() { _ = tx.Rollback() }()
+	var raw sql.NullString
+	if len(result) > 0 {
+		raw = sql.NullString{String: string(result), Valid: true}
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE jobs SET status=?,error=?,result=?,lease_until=0,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, status, message, raw, id)
+	if err != nil {
+		return err
+	}
+	j, err := read(tx.QueryRowContext(ctx, `SELECT `+columns+` FROM jobs WHERE id=?`, id))
+	if err != nil {
+		return err
+	}
+	event := eventForJob(j, status, message)
+	if event.Title == "" {
+		_ = tx.QueryRowContext(ctx, `SELECT title FROM activity WHERE job_id=? AND title<>'' ORDER BY id DESC LIMIT 1`, id).Scan(&event.Title)
+	}
+	if err = recordEvent(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) Fail(ctx context.Context, j Job, message string, maxAttempts int) error {
-	status := "pending"
-	if j.Attempts >= maxAttempts {
-		status = "failed"
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	_, e := s.db.ExecContext(ctx, `UPDATE jobs SET status=?,error=?,available_at=?,lease_until=0,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, status, message, time.Now().Add(time.Duration(j.Attempts*j.Attempts)*time.Minute).Unix(), j.ID)
-	return e
+	defer func() { _ = tx.Rollback() }()
+	status, kind := "pending", "retry"
+	if j.Attempts >= maxAttempts {
+		status, kind = "failed", "failed"
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE jobs SET status=?,error=?,available_at=?,lease_until=0,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, status, message, time.Now().Add(time.Duration(j.Attempts*j.Attempts)*time.Minute).Unix(), j.ID)
+	if err != nil {
+		return err
+	}
+	saved, err := read(tx.QueryRowContext(ctx, `SELECT `+columns+` FROM jobs WHERE id=?`, j.ID))
+	if err != nil {
+		return err
+	}
+	event := eventForJob(saved, kind, message)
+	if event.Title == "" {
+		_ = tx.QueryRowContext(ctx, `SELECT title FROM activity WHERE job_id=? AND title<>'' ORDER BY id DESC LIMIT 1`, j.ID).Scan(&event.Title)
+	}
+	if err = recordEvent(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) Retry(ctx context.Context, id int64) error {

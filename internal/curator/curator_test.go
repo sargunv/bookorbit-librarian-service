@@ -127,3 +127,16 @@ func TestRejectUnseenCover(t *testing.T) {
 		t.Fatalf("expected unseen cover rejection: %v", err)
 	}
 }
+
+func TestActivitySummaryCitesRealEvents(t *testing.T) {
+	for _, id := range []int{7, 999} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"content":%q},"finish_reason":"stop"}]}`, fmt.Sprintf(`{"title":"One change","paragraphs":["Updated a book."],"highlights":[{"text":"A source correction","eventIds":[%d]}]}`, id))
+		}))
+		_, err := New(server.URL, "key", "haiku", "terra").Summarize(context.Background(), []domain.ActivityEvent{{ID: 7, Kind: "applied", Title: "A Book"}}, "haiku")
+		server.Close()
+		if (id == 7 && err != nil) || (id == 999 && err == nil) {
+			t.Fatalf("citation %d: %v", id, err)
+		}
+	}
+}

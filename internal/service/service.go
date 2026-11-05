@@ -23,17 +23,19 @@ import (
 )
 
 type Service struct {
-	cfg         config.Config
-	db          *store.Store
-	books       *bookorbit.Client
-	judge       *curator.Curator
-	organizer   *organize.Organizer
-	paused      atomic.Bool
-	applyMu     sync.Mutex
-	planMu      sync.Mutex
-	discoveryMu sync.Mutex
-	discovery   *domain.Discovery
-	wg          sync.WaitGroup
+	cfg          config.Config
+	db           *store.Store
+	books        *bookorbit.Client
+	judge        *curator.Curator
+	organizer    *organize.Organizer
+	paused       atomic.Bool
+	applyMu      sync.Mutex
+	planMu       sync.Mutex
+	discoveryMu  sync.Mutex
+	discovery    *domain.Discovery
+	summaryMu    sync.RWMutex
+	summaryError string
+	wg           sync.WaitGroup
 }
 
 func New(c config.Config) (*Service, error) {
@@ -58,6 +60,10 @@ func New(c config.Config) (*Service, error) {
 func (s *Service) Close() error { s.wg.Wait(); return errors.Join(s.organizer.Close(), s.db.Close()) }
 
 func (s *Service) Start(ctx context.Context) {
+	if s.cfg.UIProxyToken != "" {
+		s.wg.Add(1)
+		go func() { defer s.wg.Done(); s.summarizeActivity(ctx) }()
+	}
 	for i := 0; i < s.cfg.Workers; i++ {
 		s.wg.Add(1)
 		go func() { defer s.wg.Done(); s.work(ctx) }()
@@ -159,6 +165,8 @@ func (s *Service) process(ctx context.Context, j store.Job) (string, error) {
 	if book.LibraryID != s.cfg.LibraryID {
 		return s.finish(ctx, j, "skipped", "book is outside configured library", nil)
 	}
+	s.progress(ctx, j, book.Metadata.Title, "started", 0, 0)
+	ctx = curator.WithProgress(ctx, func(stage string, done, total int) { s.progress(ctx, j, book.Metadata.Title, stage, done, total) })
 	p := j.Proposal
 	if p == nil {
 		s.planMu.Lock()
@@ -166,10 +174,12 @@ func (s *Service) process(ctx context.Context, j store.Job) (string, error) {
 		if err == nil && saved.Proposal != nil {
 			p = saved.Proposal
 		} else if err == nil {
+			s.progress(ctx, j, book.Metadata.Title, "grouping", 0, 0)
 			members, x := s.groupMembers(ctx, book)
 			if x == nil {
 				evidence := make([]domain.Evidence, 0, len(members))
-				for _, member := range members {
+				for index, member := range members {
+					s.progress(ctx, j, book.Metadata.Title, "sources", index+1, len(members))
 					candidates, searchErr := s.books.Search(ctx, member, s.cfg.Providers)
 					var warnings []string
 					if searchErr != nil {
@@ -226,6 +236,7 @@ func (s *Service) process(ctx context.Context, j store.Job) (string, error) {
 	}
 	p.Patch = refreshed.Patch
 	p.CoverURL = refreshed.CoverURL
+	s.progress(ctx, j, book.Metadata.Title, "applying", 0, 0)
 	if e = s.organizer.Backup(ctx, current); e != nil {
 		return "", e
 	}
@@ -246,6 +257,7 @@ func (s *Service) process(ctx context.Context, j store.Job) (string, error) {
 	}
 	result := json.RawMessage(`{}`)
 	if s.cfg.Organize {
+		s.progress(ctx, j, book.Metadata.Title, "organizing", 0, 0)
 		fresh, e := s.books.Book(ctx, j.BookID)
 		if e != nil {
 			return "", e
@@ -284,6 +296,7 @@ func (s *Service) Handler() http.Handler {
 			Status string `json:"status"`
 		}{"ok"})
 	})
+	s.mountUI(mux)
 	private := http.NewServeMux()
 	private.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		counts, e := s.db.Counts(r.Context())

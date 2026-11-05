@@ -40,6 +40,7 @@ func (c *Curator) observe(ctx context.Context, evidence []domain.Evidence, curre
 	client := http.Client{Timeout: 30 * time.Second}
 	for i := range evidence {
 		e := &evidence[i]
+		reportProgress(ctx, "covers", i, len(evidence))
 		for source := 0; source <= len(e.Candidates); source++ {
 			if err := ctx.Err(); err != nil {
 				return report, nil, err
@@ -121,6 +122,7 @@ func (c *Curator) observe(ctx context.Context, evidence []domain.Evidence, curre
 		Summary string                    `json:"summary"`
 		Covers  []domain.CoverObservation `json:"covers"`
 	}
+	reportProgress(ctx, "vision", len(tiles), len(tiles))
 	u, err := c.call(ctx, c.visionModel, visionInstructions, content, &observations)
 	if err != nil {
 		return report, nil, err

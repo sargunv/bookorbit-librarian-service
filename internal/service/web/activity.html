@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Librarian’s notebook · BookOrbit</title>
+    <link rel="stylesheet" href="/assets/activity.css" />
+    <script src="/assets/activity.js" defer></script>
+  </head>
+  <body>
+    <header class="masthead">
+      <a class="brand" href="/" aria-label="BookOrbit Librarian home"
+        ><svg aria-hidden="true" width="28" height="30" viewBox="0 0 28 30">
+          <path
+            d="M3 3h7v24H3zM13 3h4v24h-4zM20 4l4-1 3 23-4 1z"
+            fill="currentColor"
+          /></svg
+        >BookOrbit Librarian</a
+      >{{if .LibraryURL}}<a href="{{.LibraryURL}}">Open library</a>{{end}}
+    </header>
+    <main>
+      <div class="heading">
+        <h1>The librarian’s notebook</h1>
+        <p>
+          What’s changed, what’s been kept, and the decisions along the way.
+        </p>
+      </div>
+      <div class="layout">
+        <aside class="status" aria-label="Worker progress">
+          <div class="status-heading">
+            <span class="signal {{if .Paused}}paused{{end}}"></span>
+            <h2>
+              {{if .Paused}}Worker paused{{else if .Counts.running}}At
+              work{{else}}Between books{{end}}
+            </h2>
+          </div>
+          {{range .Active}}
+          <div class="on-desk">
+            <p class="subheading">On the desk</p>
+            <h3>{{if .Title}}{{.Title}}{{else}}Book {{.BookID}}{{end}}</h3>
+            <p class="stage">{{.Message}}</p>
+            <p class="timestamp" data-time="{{.CreatedAt}}">
+              {{when .CreatedAt}}
+            </p>
+          </div>
+          {{else}}
+          <p class="quiet">
+            {{if .Paused}}Current work will finish before the next book
+            starts.{{else}}Waiting for the next book or library
+            discovery.{{end}}
+          </p>
+          {{end}}
+          <div class="progress-section">
+            <label for="progress"
+              >{{.Completed}} of {{.Total}} books processed</label
+            ><progress id="progress" max="100" value="{{.Percent}}">
+              {{.Percent}}%
+            </progress>
+            <p class="quiet">Current library pass</p>
+          </div>
+          <dl class="counts">
+            <div>
+              <dt>Applied</dt>
+              <dd>{{index .Counts "applied"}}</dd>
+            </div>
+            <div>
+              <dt>Waiting</dt>
+              <dd>{{index .Counts "pending"}}</dd>
+            </div>
+            <div>
+              <dt>Skipped</dt>
+              <dd>{{index .Counts "skipped"}}</dd>
+            </div>
+            <div>
+              <dt>Failed</dt>
+              <dd class="{{if .Counts.failed}}error{{end}}">
+                {{index .Counts "failed"}}
+              </dd>
+            </div>
+          </dl>
+          <p class="refresh-note">
+            Updates every 30 seconds while entries are closed.
+          </p>
+        </aside>
+        <div class="stream">
+          <section class="digest" aria-labelledby="digest-heading">
+            <div class="section-heading">
+              <h2 id="digest-heading">From the notebook</h2>
+              <span class="annotation">LLM summaries</span>
+            </div>
+            {{if .SummaryError}}
+            <p class="notice">{{.SummaryError}}</p>
+            {{end}} {{range $i,$summary:=.Summaries}}
+            <article class="summary {{if $i}}previous-summary{{end}}">
+              <p class="timestamp" data-time="{{.CreatedAt}}">
+                {{when .CreatedAt}}
+              </p>
+              <h3>{{.Title}}</h3>
+              {{if .ThroughAt}}
+              <p class="timestamp">
+                Activity through
+                <span data-time="{{.ThroughAt}}">{{when .ThroughAt}}</span>
+              </p>
+              {{end}} {{range .Paragraphs}}
+              <p>{{.}}</p>
+              {{end}}{{if .Highlights}}
+              <ul class="highlights">
+                {{range .Highlights}}
+                <li>
+                  {{.Text}}
+                  <span class="citations"
+                    >{{range .EventIDs}}<a
+                      href="/?before={{cursor .}}#event-{{.}}"
+                      aria-label="Read activity entry {{.}}"
+                      >Entry {{.}}</a
+                    >{{end}}</span
+                  >
+                </li>
+                {{end}}
+              </ul>
+              {{end}}
+            </article>
+            {{else}}
+            <div class="empty">
+              <h3>The first notes are on their way.</h3>
+              <p>
+                A summary is written from recorded activity every few minutes.
+                Individual entries appear below as books are processed.
+              </p>
+            </div>
+            {{end}}
+          </section>
+          <section aria-labelledby="activity-heading">
+            <div class="section-heading">
+              <h2 id="activity-heading">Activity</h2>
+              <nav>
+                {{if .History}}<a href="/">Current pass</a
+                ><span>All passes</span>{{else}}<span>Current pass</span
+                ><a href="/?history=all">All passes</a>{{end}}
+              </nav>
+            </div>
+            {{range .Events}}
+            <article class="entry" id="event-{{.ID}}">
+              <div class="entry-line">
+                <time class="timestamp" data-time="{{.CreatedAt}}"
+                  >{{when .CreatedAt}}</time
+                ><span class="outcome {{.Kind}}">{{outcome .}}</span>
+              </div>
+              <h3>
+                {{if $.LibraryURL}}<a href="{{bookURL $.LibraryURL .BookID}}"
+                  >{{if .Title}}{{.Title}}{{else}}Book {{.BookID}}{{end}}</a
+                >{{else}}{{if .Title}}{{.Title}}{{else}}Book
+                {{.BookID}}{{end}}{{end}}
+              </h3>
+              {{if .Message}}
+              <p class="entry-message">{{.Message}}</p>
+              {{end}} {{if or .Details.Changes .Details.GroupReason
+              .Details.Warnings .Details.Error .Details.CoverChanged
+              .Details.MovedFiles .Details.MergedBooks}}
+              <details>
+                <summary>Read the details</summary>
+                <div class="entry-details">
+                  {{if .Details.GroupReason}}
+                  <p>
+                    <strong>Related books.</strong> {{.Details.GroupReason}}
+                  </p>
+                  {{end}}{{if .Details.CoverChanged}}
+                  <p>
+                    {{if eq .Kind "planned"}}A cover replacement is selected in
+                    the saved plan.{{else}}The selected cover was
+                    applied.{{end}}
+                  </p>
+                  {{end}}{{if .Details.MovedFiles}}
+                  <p>{{.Details.MovedFiles}} file(s) organized.</p>
+                  {{end}}{{if .Details.MergedBooks}}
+                  <p>
+                    Alternate formats grouped from book entries
+                    {{.Details.MergedBooks}}.
+                  </p>
+                  {{end}}{{if .Details.Changes}}
+                  <div class="changes">
+                    {{range .Details.Changes}}
+                    <section class="change">
+                      <h4>{{field .Field}}</h4>
+                      <div class="before-after">
+                        <div>
+                          <span>Before</span>
+                          <p>{{value .Before}}</p>
+                        </div>
+                        <div>
+                          <span>Selected</span>
+                          <p>{{value .After}}</p>
+                        </div>
+                      </div>
+                      {{if .Source}}
+                      <p class="source">Source: {{.Source}}</p>
+                      {{end}}
+                    </section>
+                    {{end}}
+                  </div>
+                  {{end}}{{if .Details.Warnings}}
+                  <h4>Source warnings</h4>
+                  <ul>
+                    {{range .Details.Warnings}}
+                    <li>{{.}}</li>
+                    {{end}}
+                  </ul>
+                  {{end}}{{if .Details.Error}}
+                  <p class="error">{{.Details.Error}}</p>
+                  {{end}}
+                </div>
+              </details>
+              {{end}}
+            </article>
+            {{else}}
+            <div class="empty">
+              <h3>No entries yet.</h3>
+              <p>The worker will record its next result here.</p>
+            </div>
+            {{end}} {{if .Next}}<a
+              class="older"
+              href="/?before={{.Next}}{{if .History}}&amp;history=all{{end}}"
+              >Older entries</a
+            >{{end}}
+          </section>
+        </div>
+      </div>
+    </main>
+    <footer>
+      Saved decisions are the record. Summaries are a reading guide.
+    </footer>
+  </body>
+</html>

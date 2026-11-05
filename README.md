@@ -167,6 +167,36 @@ jobs gather fresh evidence; automatic retries reuse saved proposals. Pause stops
 claiming jobs and discovery after current work; it is in memory and resets on
 restart. Stop the unit for a durable maintenance pause.
 
+## Activity page
+
+The optional read-only web page shows cached LLM digests, live worker phases,
+current-pass progress, and expandable entries with before/after metadata, source
+provenance, cover choices, retries and file-operation results. Summary
+highlights link to the underlying events. It refreshes every 30 seconds while
+entries are closed; opening details pauses refresh. All-pass history and older
+entries remain accessible.
+
+Set `UI_PROXY_TOKEN` to a separate secret of at least 24 characters. Put the
+service behind an authenticating reverse proxy such as Authelia and inject
+`X-Librarian-UI-Token` only after authentication. That capability grants the
+activity page only; the `/v1/` admin API still requires `ADMIN_TOKEN`. An admin
+bearer token can also read the page. With no UI token configured the page is
+disabled. Never expose a header-trusting proxy without authentication.
+
+`BOOKORBIT_PUBLIC_URL` enables links back to books. `MODEL_SUMMARY` defaults to
+the configured vision model; `ACTIVITY_SUMMARY_INTERVAL` defaults to `5m` and
+must be at least `1m`. Summaries are generated from new recorded outcomes, saved
+in SQLite, and reused across requests. Page refreshes never call a model.
+Summary failures do not block curation; raw activity remains available.
+
+Activity is an append-only private SQLite log, separate from sparse operational
+stdout. Existing job outcomes are imported on first startup; past retry
+transitions that were overwritten before this feature cannot be reconstructed.
+Activity entries can include titles and bibliographic changes, but never
+credentials or book contents. Preserve the SQLite database along with originals
+and BookOrbit backups. LLM summaries are a reading guide; saved events are the
+record of what happened.
+
 ## File organization and recovery
 
 Back up BookOrbit's database and application data before enabling organization.
