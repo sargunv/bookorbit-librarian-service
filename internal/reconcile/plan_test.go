@@ -103,3 +103,17 @@ func TestHistoricalAliasChainsAndRetry(t *testing.T) {
 		t.Fatal("cyclic history accepted")
 	}
 }
+
+func TestEmptySelectedSourceCannotPromoteStaleSiblingMetadata(t *testing.T) {
+	a, b := example(1, "en"), example(2, "en")
+	a.Metadata.Description = "Trusted description"
+	b.Metadata.Description = "Old description"
+	jobs := []store.Job{saved(a, nil, nil), saved(b, map[string]int{"description": 1}, nil)}
+	p, err := Build([]domain.Book{a, b}, jobs, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Groups) != 1 || len(p.Groups[0].Patch["description"]) != 0 {
+		t.Fatal("a missing candidate field promoted stale current metadata")
+	}
+}

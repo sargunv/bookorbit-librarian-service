@@ -304,6 +304,12 @@ func selectFields(g *Group, jobs []store.Job, base domain.Book, aliases map[int]
 			}
 			value := p.Patch[field]
 			if len(value) == 0 {
+				raw, _ := json.Marshal(p.Candidates[index-1].Metadata)
+				var candidate domain.Patch
+				_ = json.Unmarshal(raw, &candidate)
+				if !domain.Populated(candidate[field]) {
+					continue
+				}
 				value = domain.Values(p.Book)[field]
 			}
 			if len(value) > 0 && string(value) != "null" && string(value) != `""` {
