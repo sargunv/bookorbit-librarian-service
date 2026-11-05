@@ -126,3 +126,28 @@ func TestSaveWholeSeriesAndReuseSiblingPlan(t *testing.T) {
 		t.Fatal("overwrote in-flight sibling plan")
 	}
 }
+
+func TestDiscoveryPersistsAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "jobs.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := domain.Discovery{Groups: []domain.Group{{BookIDs: []int{1, 2}, Reason: "same work, unknown series"}}}
+	if err = s.SaveDiscovery(ctx, "4", plan); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	saved, err := s.Discovery(ctx, "4")
+	if err != nil || len(saved.Groups) != 1 || len(saved.Groups[0].BookIDs) != 2 {
+		t.Fatalf("lost discovery: %+v %v", saved, err)
+	}
+}

@@ -23,15 +23,17 @@ import (
 )
 
 type Service struct {
-	cfg       config.Config
-	db        *store.Store
-	books     *bookorbit.Client
-	judge     *curator.Curator
-	organizer *organize.Organizer
-	paused    atomic.Bool
-	applyMu   sync.Mutex
-	planMu    sync.Mutex
-	wg        sync.WaitGroup
+	cfg         config.Config
+	db          *store.Store
+	books       *bookorbit.Client
+	judge       *curator.Curator
+	organizer   *organize.Organizer
+	paused      atomic.Bool
+	applyMu     sync.Mutex
+	planMu      sync.Mutex
+	discoveryMu sync.Mutex
+	discovery   *domain.Discovery
+	wg          sync.WaitGroup
 }
 
 func New(c config.Config) (*Service, error) {
@@ -83,6 +85,9 @@ func (s *Service) Start(ctx context.Context) {
 func (s *Service) Discover(ctx context.Context, limit int) (int, error) {
 	ids, e := s.books.ListBooks(ctx, s.cfg.LibraryID)
 	if e != nil {
+		return 0, e
+	}
+	if _, e = s.discoverGroups(ctx, ids, false); e != nil {
 		return 0, e
 	}
 	if limit > 0 && len(ids) > limit {
@@ -161,7 +166,7 @@ func (s *Service) process(ctx context.Context, j store.Job) (string, error) {
 		if err == nil && saved.Proposal != nil {
 			p = saved.Proposal
 		} else if err == nil {
-			members, x := s.books.Series(ctx, book)
+			members, x := s.groupMembers(ctx, book)
 			if x == nil {
 				evidence := make([]domain.Evidence, 0, len(members))
 				for _, member := range members {
@@ -325,6 +330,27 @@ func (s *Service) Handler() http.Handler {
 			return
 		}
 		writeJSON(w, 200, j)
+	})
+	private.HandleFunc("GET /v1/discovery", func(w http.ResponseWriter, r *http.Request) {
+		plan, err := s.db.Discovery(r.Context(), curator.PolicyVersion)
+		if err != nil {
+			http.Error(w, "discovery not available", 404)
+			return
+		}
+		writeJSON(w, 200, plan)
+	})
+	private.HandleFunc("POST /v1/discovery", func(w http.ResponseWriter, r *http.Request) {
+		ids, err := s.books.ListBooks(r.Context(), s.cfg.LibraryID)
+		if err != nil {
+			http.Error(w, "inventory failed", http.StatusBadGateway)
+			return
+		}
+		plan, err := s.discoverGroups(r.Context(), ids, true)
+		if err != nil {
+			http.Error(w, "discovery failed", http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, 200, plan)
 	})
 	private.HandleFunc("POST /v1/jobs", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

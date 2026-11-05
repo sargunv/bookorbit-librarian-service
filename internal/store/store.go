@@ -43,6 +43,7 @@ func Open(path string) (*Store, error) {
 	s := &Store{db: db}
 	_, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL;
  CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY,book_id INTEGER NOT NULL,policy TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,error TEXT NOT NULL DEFAULT '',proposal TEXT,result TEXT,lease_until INTEGER NOT NULL DEFAULT 0,available_at INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),UNIQUE(book_id,policy));
+ CREATE TABLE IF NOT EXISTS discovery(policy TEXT PRIMARY KEY,plan TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS jobs_claim ON jobs(status,available_at,id);`)
 	if err != nil {
 		_ = db.Close()
@@ -216,4 +217,24 @@ func (s *Store) SaveGroup(ctx context.Context, proposals []domain.Proposal) erro
 		}
 	}
 	return tx.Commit()
+}
+
+func (s *Store) Discovery(ctx context.Context, policy string) (domain.Discovery, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT plan FROM discovery WHERE policy=?`, policy).Scan(&raw)
+	if err != nil {
+		return domain.Discovery{}, err
+	}
+	var plan domain.Discovery
+	err = json.Unmarshal([]byte(raw), &plan)
+	return plan, err
+}
+
+func (s *Store) SaveDiscovery(ctx context.Context, policy string, plan domain.Discovery) error {
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO discovery(policy,plan) VALUES(?,?) ON CONFLICT(policy) DO UPDATE SET plan=excluded.plan`, policy, string(raw))
+	return err
 }

@@ -13,22 +13,26 @@ compatibility before upgrading BookOrbit.
 
 ## How it works
 
-1. Discover books and enqueue durable SQLite jobs. The planning unit is a whole
-   series; a standalone book is a group of one. Series membership comes from
-   BookOrbit's current series field within the configured library.
+1. Discover books and enqueue durable SQLite jobs. An inventory-wide discovery
+   call considers titles, authors, identifiers, filenames, nearby folder names,
+   and existing series fields as uncertain hints. It finds related works even
+   when series fields are absent or dirty. The resulting groups are editorial
+   hypotheses, not bibliographic assertions.
 2. Search BookOrbit's configured providers for each volume, retaining linked
    edition records and making an independent title/author search without old
    provider IDs or ISBNs. This avoids a bad existing link pinning all evidence
    to the wrong work or language. Partial results carry warnings; search
    failures retry.
-3. Present labeled contact sheets of current and candidate covers to the vision
-   model (default Haiku). It describes visual families, visible text and
-   defects.
+3. For each discovered group, present labeled contact sheets of current and
+   candidate covers to the vision model (default Haiku). It describes visual
+   families, visible text and defects.
 4. Give those observations and source records to the metadata model (default
-   Terra). It reconciles identities, selects fields across matching providers
-   and chooses a coordinated set of actual covers. Both tasks run for every
-   group with images; there is no confidence or review ladder.
-5. Save the entire series plan in one SQLite transaction before any edits.
+   Terra). It resolves the actual works and series inside the provisional group,
+   selects fields across matching providers and chooses coordinated covers for
+   related works without forcing every group member into the same series. Both
+   tasks run for every group with images; there is no confidence or review
+   ladder.
+5. Save the entire group plan in one SQLite transaction before any edits.
    Sibling jobs reuse it. Each field records its provider; edition fields
    require explicit edition evidence. Locked fields and good current values are
    kept.
@@ -36,11 +40,12 @@ compatibility before upgrading BookOrbit.
    through BookOrbit, write into the book files, then organize files and catalog
    paths using a recovery journal.
 
-The service sends bibliographic metadata, basenames and cover contact sheets to
-its model endpoint. It does not send book contents or full filesystem paths.
-Models select supplied evidence, not new bibliographic facts or invented cover
-art. If no suitable coordinated family exists, appropriate current covers can
-remain. Translations, guides and omnibuses are considered on their own merits.
+The service sends bibliographic metadata, basenames, nearby folder names and
+cover contact sheets to its model endpoint. It does not send book contents or
+full filesystem paths. Models select supplied evidence, not new bibliographic
+facts or invented cover art. If no suitable coordinated family exists,
+appropriate current covers can remain. Translations, guides and omnibuses are
+considered on their own merits.
 
 The role split was informed by a small live comparison on identical library
 examples: both models recognized the same cover family, but Haiku proposed
@@ -130,6 +135,8 @@ arguments:
 
 ```sh
 podman exec homelab-bookorbit-librarian /librarian request GET /v1/status
+podman exec homelab-bookorbit-librarian /librarian request GET /v1/discovery
+podman exec homelab-bookorbit-librarian /librarian request POST /v1/discovery
 podman exec homelab-bookorbit-librarian /librarian request POST /v1/jobs '{"bookIds":[42,43]}'
 podman exec homelab-bookorbit-librarian /librarian request POST /v1/jobs '{}'
 podman exec homelab-bookorbit-librarian /librarian request GET '/v1/jobs?status=failed'
@@ -138,6 +145,13 @@ podman exec homelab-bookorbit-librarian /librarian request POST /v1/jobs/1/retry
 podman exec homelab-bookorbit-librarian /librarian request POST /v1/pause
 podman exec homelab-bookorbit-librarian /librarian request POST /v1/resume
 ```
+
+`GET /v1/discovery` shows the persisted library-wide groups and rationales.
+`POST /v1/discovery` rebuilds them from the current whole inventory. Discovery
+otherwise reuses its saved snapshot until new book IDs appear; metadata writes
+and file moves do not repeatedly trigger global model calls. Books with no
+useful relationship hints can remain isolated until better catalog evidence is
+available.
 
 `SERVICE_URL` overrides the client's default `http://127.0.0.1:8080`.
 `HEALTH_URL` similarly overrides the health command's default `/healthz` URL.
