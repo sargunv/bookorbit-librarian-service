@@ -280,6 +280,16 @@ recorded transactionally in SQLite. Preserve plans alongside SQLite/originals.
 The idle worker automatically performs the same final pass and archives its
 plans next to SQLite; failed/planned curation jobs prevent automatic merging.
 
+For an operator-reviewed provider gap, a private single-book plan group may set
+`reviewReason`, name the original skipped `jobId`, and supply `sources` for
+every patched field. Use embedded title/copyright pages and verifiable external
+sources; do not manufacture a model decision or provider match. The same command
+backs up, applies, organizes and verifies the reviewed book, then marks that
+skipped job applied with an explicit manual-review event and source provenance.
+Its original proposal and skip history remain intact. Active jobs and unrelated
+completed reviews are rejected before writes; the identical plan can be resumed
+safely.
+
 To recover personal data deleted by an older version, extract book-reference
 rows from the matching pre-merge custom-format PostgreSQL backup on the host:
 

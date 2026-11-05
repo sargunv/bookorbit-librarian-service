@@ -19,15 +19,16 @@ type Plan struct {
 }
 
 type Group struct {
-	Survivor    int               `json:"survivor"`
-	BookIDs     []int             `json:"bookIds"`
-	FileIDs     []int             `json:"fileIds"`
-	JobID       int64             `json:"jobId"`
-	Before      domain.Patch      `json:"before"`
-	Patch       domain.Patch      `json:"patch"`
-	Sources     map[string]string `json:"sources"`
-	CoverURL    string            `json:"coverUrl,omitempty"`
-	CoverSource string            `json:"coverSource,omitempty"`
+	Survivor     int               `json:"survivor"`
+	BookIDs      []int             `json:"bookIds"`
+	FileIDs      []int             `json:"fileIds"`
+	JobID        int64             `json:"jobId"`
+	Before       domain.Patch      `json:"before"`
+	Patch        domain.Patch      `json:"patch"`
+	Sources      map[string]string `json:"sources"`
+	CoverURL     string            `json:"coverUrl,omitempty"`
+	CoverSource  string            `json:"coverSource,omitempty"`
+	ReviewReason string            `json:"reviewReason,omitempty"`
 }
 
 // HistoricalAliases retains every old merge, including earlier curation policies.

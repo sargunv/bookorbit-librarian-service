@@ -145,6 +145,19 @@ func (s *Service) ReconcileFile(ctx context.Context, path string, apply bool, re
 }
 
 func (s *Service) applyReconciliation(ctx context.Context, run string, aliases map[int]int, g reconcile.Group) error {
+	if g.ReviewReason != "" {
+		if len(g.BookIDs) != 1 || g.BookIDs[0] != g.Survivor {
+			return errors.New("manual review must name a single surviving book")
+		}
+		for field := range g.Patch {
+			if g.Sources[field] == "" {
+				return fmt.Errorf("manual review field %s lacks evidence provenance", field)
+			}
+		}
+		if err := s.db.CheckReview(ctx, run, g.JobID, g.Survivor); err != nil {
+			return err
+		}
+	}
 	before, err := s.books.Book(ctx, g.Survivor)
 	if err != nil {
 		return err
@@ -242,6 +255,17 @@ func (s *Service) applyReconciliation(ctx context.Context, run string, aliases m
 	}
 	coverage := domain.MetadataCoverage(before.Metadata, g.Patch)
 	event := domain.ActivityEvent{JobID: g.JobID, BookID: g.Survivor, Title: after.Metadata.Title, Policy: curator.PolicyVersion, Kind: "applied", Message: "Reconciled saved curation and verified surviving record", Details: domain.ActivityDetails{Changes: changes, Coverage: &coverage, CoverChanged: g.CoverURL != "", CoverSource: g.CoverSource, MergedBooks: result.MergedBookIDs, MovedFiles: result.MovedFileCount, Reason: "Reused saved source selections; transferred personal data before deleting merged records"}}
+	if g.ReviewReason != "" {
+		event.Stage = "manual-review"
+		event.Message = "Applied manual evidence review and verified BookOrbit"
+		event.Details.Reason = g.ReviewReason
+		for _, source := range g.Sources {
+			if !slices.Contains(event.Details.Sources, source) {
+				event.Details.Sources = append(event.Details.Sources, source)
+			}
+		}
+		slices.Sort(event.Details.Sources)
+	}
 	return s.db.Reconciled(ctx, run, aliasesForGroup(aliases, g.Survivor), event, g.CoverURL)
 }
 

@@ -64,6 +64,27 @@ func (s *Store) ReconciliationDone(ctx context.Context, run string, book int) (b
 	return n > 0, err
 }
 
+func reviewable(j Job, run string, book int) error {
+	var result struct {
+		Run string `json:"manualReviewRun"`
+	}
+	_ = json.Unmarshal(j.Result, &result)
+	allowed := j.Status == "skipped" || (j.Status == "applied" && result.Run == run)
+	if run == "" || j.BookID != book || !allowed {
+		return fmt.Errorf("manual review requires the skipped job for book %d or its same-plan retry", book)
+	}
+	return nil
+}
+
+// CheckReview rejects active or unrelated jobs before any external side effects.
+func (s *Store) CheckReview(ctx context.Context, run string, job int64, book int) error {
+	j, err := s.Get(ctx, job)
+	if err != nil {
+		return err
+	}
+	return reviewable(j, run, book)
+}
+
 // Reconciled records verification and aliases with its activity event in one
 // SQLite transaction. The plan's run key makes interrupted retries idempotent.
 func (s *Store) Reconciled(ctx context.Context, run string, aliases map[int]int, event domain.ActivityEvent, coverURL string) error {
@@ -72,6 +93,25 @@ func (s *Store) Reconciled(ctx context.Context, run string, aliases map[int]int,
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if event.Stage == "manual-review" {
+		j, e := read(tx.QueryRowContext(ctx, "SELECT "+columns+" FROM jobs WHERE id=?", event.JobID))
+		if e != nil {
+			return e
+		}
+		if e = reviewable(j, run, event.BookID); e != nil {
+			return e
+		}
+		result, e := json.Marshal(map[string]any{"manualReviewRun": run, "reason": event.Details.Reason, "sources": event.Details.Sources, "movedFileCount": event.Details.MovedFiles})
+		if e != nil {
+			return e
+		}
+		// Keep the original skipped proposal and append-only history as evidence.
+		if j.Status == "skipped" {
+			if _, err = tx.ExecContext(ctx, `UPDATE jobs SET status='applied',error='',result=?,lease_until=0,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, string(result), event.JobID); err != nil {
+				return err
+			}
+		}
+	}
 	for old, dest := range aliases {
 		if _, err = tx.ExecContext(ctx, "INSERT INTO book_aliases(old_id,book_id) VALUES(?,?) ON CONFLICT(old_id) DO UPDATE SET book_id=excluded.book_id", old, dest); err != nil {
 			return err
