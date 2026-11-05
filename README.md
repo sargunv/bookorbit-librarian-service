@@ -16,8 +16,11 @@ compatibility before upgrading BookOrbit.
 1. Discover books and enqueue durable SQLite jobs. The planning unit is a whole
    series; a standalone book is a group of one. Series membership comes from
    BookOrbit's current series field within the configured library.
-2. Search BookOrbit's configured providers for each volume. Partial provider
-   results remain usable with a warning; complete search failures retry.
+2. Search BookOrbit's configured providers for each volume, retaining linked
+   edition records and making an independent title/author search without old
+   provider IDs or ISBNs. This avoids a bad existing link pinning all evidence
+   to the wrong work or language. Partial results carry warnings; search
+   failures retry.
 3. Present labeled contact sheets of current and candidate covers to the vision
    model (default Haiku). It describes visual families, visible text and
    defects.

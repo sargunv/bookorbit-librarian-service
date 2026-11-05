@@ -87,7 +87,7 @@ func TestSearchSSEPartialAndFailure(t *testing.T) {
 	}))
 	defer s.Close()
 	b := domain.Book{ID: 8, Metadata: domain.Metadata{Title: "Example", Authors: []string{"Writer"}, ISBN13: "123"}}
-	candidates, err := New(s.URL, "secret").Search(context.Background(), b, []string{"google", "openLibrary"})
+	candidates, err := New(s.URL, "secret").search(context.Background(), b, []string{"google", "openLibrary"}, true)
 	status, ok := err.(*SearchError)
 	if !ok || status.Statuses["openLibrary"] != "timeout" || len(candidates) != 1 || candidates[0].Title != "Result" {
 		t.Fatalf("got %#v, %v", candidates, err)
@@ -136,5 +136,37 @@ func TestPaginationAndWriteFailure(t *testing.T) {
 	}
 	if c.Write(context.Background(), 1) == nil {
 		t.Error("missed file write failure")
+	}
+}
+
+func TestSearchEscapesWrongStoredIdentifiers(t *testing.T) {
+	searches := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/login") {
+			_, _ = fmt.Fprint(w, `{"accessToken":"token"}`)
+			return
+		}
+		searches++
+		q := r.URL.Query()
+		if q.Get("title") != "A Book" || q.Get("author") != "Writer" {
+			t.Error("missing title/author")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if searches == 1 {
+			if q.Get("bookId") != "8" || q.Get("isbn") != "wrong" {
+				t.Error("missing linked lookup")
+			}
+			_, _ = fmt.Fprint(w, "data: {\"provider\":\"hardcover\",\"providerId\":\"old\",\"title\":\"Translation\",\"language\":\"rus\"}\n\n")
+		} else {
+			if q.Has("bookId") || q.Has("isbn") {
+				t.Error("fresh search pinned to stored identity")
+			}
+			_, _ = fmt.Fprint(w, "data: {\"provider\":\"hardcover\",\"providerId\":\"new\",\"title\":\"A Book\",\"language\":\"eng\"}\n\n")
+		}
+	}))
+	defer server.Close()
+	cs, err := New(server.URL, "key").Search(context.Background(), domain.Book{ID: 8, Metadata: domain.Metadata{Title: "A Book", Authors: []string{"Writer"}, ISBN13: "wrong"}}, []string{"hardcover"})
+	if err != nil || searches != 2 || len(cs) != 2 || cs[1].ProviderID != "new" {
+		t.Fatalf("independent evidence missing: %+v %v", cs, err)
 	}
 }

@@ -213,11 +213,61 @@ func (e *SearchError) Error() string {
 	return fmt.Sprintf("bookorbit: metadata providers did not complete: %v", e.Statuses)
 }
 
+// Search retains linked edition evidence and also searches independently of old
+// identifiers. BookOrbit otherwise short-circuits to existing provider IDs,
+// which can pin a wrongly cataloged book to the wrong language or work.
 func (c *Client) Search(ctx context.Context, book domain.Book, providers []string) ([]domain.Candidate, error) {
+	candidates, err := c.search(ctx, book, providers, true)
+	var partial *SearchError
+	if err != nil && !errors.As(err, &partial) {
+		return candidates, err
+	}
+	if book.Metadata.Title == "" {
+		return candidates, err
+	}
+	fresh, freshErr := c.search(ctx, book, providers, false)
+	type identity struct{ provider, id, edition, cover string }
+	seen := map[identity]bool{}
+	merged := make([]domain.Candidate, 0, len(candidates)+len(fresh))
+	for _, candidate := range append(candidates, fresh...) {
+		key := identity{candidate.Provider, candidate.ProviderID, candidate.HardcoverEditionID, candidate.CoverURL}
+		if !seen[key] {
+			merged = append(merged, candidate)
+			seen[key] = true
+		}
+	}
+	statuses := map[string]string{}
+	if partial != nil {
+		for k, v := range partial.Statuses {
+			statuses[k] = v
+		}
+	}
+	if freshErr != nil {
+		var interruption *SearchError
+		if errors.As(freshErr, &interruption) {
+			for k, v := range interruption.Statuses {
+				statuses["title-author/"+k] = v
+			}
+		} else if len(merged) == 0 {
+			return nil, freshErr
+		} else {
+			statuses["title-author"] = "request failed"
+		}
+	}
+	if len(statuses) > 0 {
+		return merged, &SearchError{Statuses: statuses}
+	}
+	return merged, nil
+}
+
+func (c *Client) search(ctx context.Context, book domain.Book, providers []string, linked bool) ([]domain.Candidate, error) {
 	if len(providers) == 0 {
 		return nil, errors.New("bookorbit: at least one metadata provider is required")
 	}
-	q := url.Values{"providers": {strings.Join(providers, ",")}, "resultsPerProvider": {"5"}, "bookId": {strconv.Itoa(book.ID)}}
+	q := url.Values{"providers": {strings.Join(providers, ",")}, "resultsPerProvider": {"5"}}
+	if linked {
+		q.Set("bookId", strconv.Itoa(book.ID))
+	}
 	if book.Metadata.Title != "" {
 		q.Set("title", book.Metadata.Title)
 	}
@@ -228,7 +278,7 @@ func (c *Client) Search(ctx context.Context, book domain.Book, providers []strin
 	if isbn == "" {
 		isbn = book.Metadata.ISBN10
 	}
-	if isbn != "" {
+	if linked && isbn != "" {
 		q.Set("isbn", isbn)
 	}
 	resp, err := c.request(ctx, http.MethodGet, "/metadata-fetch/stream?"+q.Encode(), nil)

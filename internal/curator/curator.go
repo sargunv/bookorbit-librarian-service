@@ -20,7 +20,7 @@ import (
 	"github.com/sargunv/bookorbit-librarian-service/internal/domain"
 )
 
-const PolicyVersion = "2"
+const PolicyVersion = "3"
 
 type Curator struct {
 	baseURL, apiKey, visionModel, metadataModel string
