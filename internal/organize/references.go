@@ -58,7 +58,14 @@ func (o *Organizer) transferReferences(ctx context.Context, tx *sql.Tx, old, des
 	}
 	for i := range refs {
 		r := &refs[i]
-		rows, e := tx.QueryContext(ctx, "SELECT to_jsonb(t)::text FROM public."+quoted(r.Table)+" t WHERE "+quoted(r.Column)+" IN ($1,$2) FOR UPDATE", old, dest)
+		lock := " FOR UPDATE"
+		if curatedOrDerived(r.Table) {
+			lock = ""
+		}
+		// Read-only bibliographic tables need no UPDATE grant merely to archive
+		// their rows. Parent books are already locked by the organizer; mutable
+		// personal references retain row locks through transfer and deletion.
+		rows, e := tx.QueryContext(ctx, "SELECT to_jsonb(t)::text FROM public."+quoted(r.Table)+" t WHERE "+quoted(r.Column)+" IN ($1,$2)"+lock, old, dest)
 		if e != nil {
 			return fmt.Errorf("read merge references %s: %w", r.Table, e)
 		}
