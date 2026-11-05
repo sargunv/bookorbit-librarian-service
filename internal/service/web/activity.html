@@ -3,234 +3,281 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>BookOrbit Librarian · Activity</title>
-    <link rel="stylesheet" href="/assets/activity.css" />
-    <script src="/assets/activity.js" defer></script>
+    <title>Activity · BookOrbit Librarian</title>
+    <link rel="stylesheet" href="/assets/activity.css?v=5" />
+    <script src="/assets/activity.js?v=5" defer></script>
   </head>
   <body>
     <header class="masthead">
-      <a class="brand" href="/" aria-label="BookOrbit Librarian home"
-        ><svg aria-hidden="true" width="28" height="30" viewBox="0 0 28 30">
-          <path
-            d="M3 3h7v24H3zM13 3h4v24h-4zM20 4l4-1 3 23-4 1z"
-            fill="currentColor"
-          /></svg
-        >BookOrbit Librarian</a
-      >{{if .LibraryURL}}<a href="{{.LibraryURL}}">Open library</a>{{end}}
+      <a class="brand" href="/">BookOrbit Librarian</a><span>Activity</span>{{if
+      .LibraryURL}}<a class="library-link" href="{{.LibraryURL}}"
+        >Open library</a
+      >{{end}}
     </header>
     <main>
-      <div class="heading">
-        <h1>Activity</h1>
-        <p>Worker status, metadata changes and sources.</p>
+      <section class="worker" aria-label="Worker status">
+        <div class="worker-state">
+          <span class="signal {{if .Paused}}paused{{end}}"></span
+          ><strong
+            >{{if .Paused}}Paused{{else if
+            .Counts.running}}Running{{else}}Idle{{end}}</strong
+          >
+        </div>
+        <div class="current-job">
+          {{range .Active}}<strong>{{.Title}}</strong><span>{{.Message}}</span
+          ><time data-time="{{.CreatedAt}}">{{when .CreatedAt}}</time
+          >{{else}}<span>No active job</span>{{end}}
+        </div>
+        <div class="progress">
+          <span><strong>{{.Completed}} / {{.Total}}</strong> processed</span
+          ><progress max="100" value="{{.Percent}}">{{.Percent}}%</progress
+          ><small
+            >{{index .Counts "pending"}} waiting · {{index .Counts "failed"}}
+            failed</small
+          >
+        </div>
+      </section>
+      <section class="overview" aria-label="Recorded outcomes">
+        <div>
+          <strong>{{.Stats.Metadata}}</strong><span>Metadata updated</span>
+        </div>
+        <div>
+          <strong>{{.Stats.Covers}}</strong><span>Covers replaced</span>
+        </div>
+        <div>
+          <strong>{{signed .Stats.Filled}}</strong
+          ><span>Core fields filled, net</span>
+        </div>
+        <div>
+          <strong>{{.Stats.Links}}</strong><span>Provider links only</span>
+        </div>
+        <div>
+          <strong>{{.Stats.Unchanged}}</strong><span>No metadata change</span>
+        </div>
+        <div class="{{if .Stats.Issues}}has-issues{{end}}">
+          <strong>{{.Stats.Issues}}</strong><span>Unresolved errors</span>
+        </div>
+      </section>
+      <div class="log-heading">
+        <h1>Activity log</h1>
+        <nav aria-label="History">
+          {{if .History}}<a href="/?filter={{.Filter}}">Current pass</a
+          ><span>All passes</span>{{else}}<span>Current pass</span
+          ><a href="/?history=all&amp;filter={{.Filter}}">All passes</a>{{end}}
+        </nav>
       </div>
-      <div class="layout">
-        <aside class="status" aria-label="Worker progress">
-          <div class="status-heading">
-            <span class="signal {{if .Paused}}paused{{end}}"></span>
-            <h2>
-              {{if .Paused}}Worker paused{{else if
-              .Counts.running}}Running{{else}}Idle{{end}}
-            </h2>
-          </div>
-          {{range .Active}}
-          <div class="current-job">
-            <p class="subheading">Current job</p>
-            <h3>{{if .Title}}{{.Title}}{{else}}Book {{.BookID}}{{end}}</h3>
-            <p class="stage">{{.Message}}</p>
-            <p class="timestamp" data-time="{{.CreatedAt}}">
-              {{when .CreatedAt}}
-            </p>
-          </div>
-          {{else}}
-          <p class="quiet">
-            {{if .Paused}}Current work will finish before the next book
-            starts.{{else}}Waiting for the next book or library
-            discovery.{{end}}
-          </p>
+      <nav class="filters" aria-label="Filter activity">
+        {{range .Filters}}<a
+          href="/?filter={{.Key}}{{if $.History}}&amp;history=all{{end}}"
+          {{if
+          .Selected}}aria-current="page"
           {{end}}
-          <div class="progress-section">
-            <label for="progress"
-              >{{.Completed}} of {{.Total}} books processed</label
-            ><progress id="progress" max="100" value="{{.Percent}}">
-              {{.Percent}}%
-            </progress>
-            <p class="quiet">Current library pass</p>
-          </div>
-          <dl class="counts">
-            <div>
-              <dt>Applied</dt>
-              <dd>{{index .Counts "applied"}}</dd>
+          >{{.Label}}<span>{{.Count}}</span></a
+        >{{end}}
+      </nav>
+      <div class="column-head" aria-hidden="true">
+        <span>Time</span><span>Book / outcome</span><span>Changes</span
+        ><span>Completeness</span><span>Sources</span><span></span>
+      </div>
+      <section class="events" aria-label="Activity entries">
+        {{range .Rows}}
+        <details
+          class="event {{.Impact}} {{if .Recovered}}recovered{{end}}"
+          id="event-{{.ID}}"
+        >
+          <summary class="event-row">
+            <time class="event-time" data-time="{{.CreatedAt}}"
+              >{{when .CreatedAt}}</time
+            >
+            <span class="book-cell">
+              <span class="cover-slot"
+                ><img
+                  src="/covers/{{.JobID}}/{{if .AfterCover}}after{{else}}current{{end}}"
+                  alt=""
+                  loading="lazy"
+                  width="38"
+                  height="56"
+              /></span>
+              <span class="book-info"
+                ><strong
+                  >{{if .Title}}{{.Title}}{{else}}Book
+                  {{.BookID}}{{end}}</strong
+                ><span class="outcome {{.Impact}}">{{.Label}}</span>{{if
+                .Details.CoverChanged}}<span class="cover-change"
+                  >Cover replaced</span
+                >{{end}}</span
+              >
+            </span>
+            <span class="badges" aria-label="Changed fields">
+              {{if .Details.Error}}<span class="error-text"
+                >{{.Details.Error}}</span
+              >{{else}}{{range .Badges}}<span class="badge {{.Class}}"
+                ><span>{{if eq .Class "added"}}+ {{end}}{{.Field}}</span
+                ><small>{{.Action}}</small></span
+              >{{else}}<span class="muted">No field changes</span>{{end}}{{end}}
+            </span>
+            <span class="coverage-cell"
+              >{{if .Details.Coverage}}<span class="coverage-values"
+                ><span
+                  >{{.Details.Coverage.Before}}<small
+                    >/{{.Details.Coverage.Total}}</small
+                  ></span
+                ><span class="arrow">→</span
+                ><strong
+                  >{{.Details.Coverage.After}}<small
+                    >/{{.Details.Coverage.Total}}</small
+                  ></strong
+                ></span
+              ><span
+                class="coverage-delta {{if gt .Delta 0}}gain{{else if lt .Delta 0}}loss{{end}}"
+                >{{if eq .Delta 0}}No change{{else}}{{signed .Delta}}
+                filled{{end}}</span
+              >{{else}}<span class="muted">—</span>{{end}}</span
+            >
+            <span class="provider-list"
+              >{{range .Providers}}<span class="provider">{{.}}</span
+              >{{else}}<span class="muted">Not recorded</span>{{end}}</span
+            >
+            <span class="expand" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="event-details">
+            <div class="detail-heading">
+              <strong>{{.Label}}</strong>{{if $.LibraryURL}}<a
+                href="{{bookURL $.LibraryURL .BookID}}"
+                >Open in BookOrbit</a
+              >{{end}}<a
+                href="/?before={{cursor .ID}}{{if $.History}}&amp;history=all{{end}}#event-{{.ID}}"
+                >Event {{.ID}}</a
+              >
             </div>
-            <div>
-              <dt>Waiting</dt>
-              <dd>{{index .Counts "pending"}}</dd>
+            {{if .Explanation}}
+            <p class="reason"><strong>Why:</strong> {{.Explanation}}</p>
+            {{else if .Message}}
+            <p class="reason"><strong>Reason:</strong> {{.Message}}</p>
+            {{end}} {{if .Details.Coverage}}
+            <p class="coverage-note">
+              Completeness: {{.Details.Coverage.Before}} →
+              {{.Details.Coverage.After}} of {{.Details.Coverage.Total}} core
+              fields filled. {{if .Missing}}Still missing:
+              {{.Missing}}.{{else}}All core fields are populated.{{end}} This
+              measures presence, not correctness.
+            </p>
+            {{end}} {{if .Details.CoverChanged}}
+            <div class="cover-comparison">
+              <figure>
+                {{if .BeforeCover}}<img
+                  src="/covers/{{.JobID}}/before"
+                  alt="Cover before this change"
+                  loading="lazy"
+                />{{else}}<span class="missing-cover">Not captured</span>{{end}}
+                <figcaption>Before</figcaption>
+              </figure>
+              <span class="arrow">→</span>
+              <figure>
+                <img
+                  src="/covers/{{.JobID}}/{{if .AfterCover}}after{{else}}current{{end}}"
+                  alt="Cover after this change"
+                  loading="lazy"
+                />
+                <figcaption>
+                  {{if .AfterCover}}After{{else}}Current cover{{end}}
+                </figcaption>
+              </figure>
+              {{if .Details.CoverSource}}
+              <p class="source">Cover source: {{.Details.CoverSource}}</p>
+              {{end}}
             </div>
-            <div>
-              <dt>Skipped</dt>
-              <dd>{{index .Counts "skipped"}}</dd>
+            {{end}} {{if .Details.Changes}}
+            <div class="diff-scroll">
+              <table class="diff">
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Before</th>
+                    <th>
+                      {{if eq .Kind "planned"}}Planned{{else}}After{{end}}
+                    </th>
+                    <th>Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {{range .Details.Changes}}
+                  <tr>
+                    <th>{{field .Field}}</th>
+                    <td><div>{{value .Before}}</div></td>
+                    <td><div>{{value .After}}</div></td>
+                    <td class="source">{{.Source}}</td>
+                  </tr>
+                  {{end}}
+                </tbody>
+              </table>
             </div>
-            <div>
-              <dt>Failed</dt>
-              <dd class="{{if .Counts.failed}}error{{end}}">
-                {{index .Counts "failed"}}
-              </dd>
-            </div>
-          </dl>
-          <p class="refresh-note">
-            Updates every 30 seconds while entries are closed.
-          </p>
-        </aside>
-        <div class="stream">
-          <section class="digest" aria-labelledby="digest-heading">
-            <div class="section-heading">
-              <h2 id="digest-heading">Change log</h2>
-              <span class="annotation">LLM summaries</span>
-            </div>
-            {{if .SummaryError}}
-            <p class="notice">{{.SummaryError}}</p>
-            {{end}} {{range .Summaries}}
-            <article class="summary">
-              <p class="timestamp" data-time="{{.CreatedAt}}">
-                {{when .CreatedAt}}
-              </p>
-              {{if .ThroughAt}}
-              <p class="timestamp">
-                Activity through
-                <span data-time="{{.ThroughAt}}">{{when .ThroughAt}}</span>
-              </p>
-              {{end}}{{if .Highlights}}
-              <ul class="highlights">
-                {{range .Highlights}}
-                <li>
-                  {{.Text}}
-                  <span class="citations"
-                    >{{range .EventIDs}}<a
-                      href="/?before={{cursor .}}#event-{{.}}"
-                      aria-label="Read activity entry {{.}}"
-                      >Entry {{.}}</a
-                    >{{end}}</span
-                  >
-                </li>
+            {{end}} {{if .Details.Sources}}
+            <p class="source">
+              Matched / selected source records: {{range
+              $i,$source:=.Details.Sources}}{{if $i}}, {{end}}{{$source}}{{end}}
+            </p>
+            {{end}} {{if .Details.MovedFiles}}
+            <p>{{.Details.MovedFiles}} file(s) organized.</p>
+            {{end}}{{if .Details.MergedBooks}}
+            <p>
+              Alternate formats grouped from entries {{.Details.MergedBooks}}.
+            </p>
+            {{end}} {{if .Details.GroupReason}}
+            <details class="group-details">
+              <summary>Related-book context</summary>
+              <p>{{.Details.GroupReason}}</p>
+            </details>
+            {{end}} {{if .Details.Warnings}}
+            <div class="warnings">
+              <strong>Source warnings</strong>
+              <ul>
+                {{range .Details.Warnings}}
+                <li>{{.}}</li>
                 {{end}}
               </ul>
-              {{end}}
-            </article>
-            {{else}}
-            <div class="empty">
-              <h3>No summaries yet.</h3>
-              <p>
-                A summary is written from recorded activity every few minutes.
-                Individual entries appear below as books are processed.
-              </p>
             </div>
+            {{end}} {{if .Details.Error}}
+            <p class="error-text">
+              {{.Details.Error}}{{if .Recovered}} — a later attempt
+              completed.{{end}}
+            </p>
             {{end}}
-          </section>
-          <section aria-labelledby="activity-heading">
-            <div class="section-heading">
-              <h2 id="activity-heading">Event details</h2>
-              <nav>
-                {{if .History}}<a href="/">Current pass</a
-                ><span>All passes</span>{{else}}<span>Current pass</span
-                ><a href="/?history=all">All passes</a>{{end}}
-              </nav>
-            </div>
-            {{range .Events}}
-            <article class="entry" id="event-{{.ID}}">
-              <div class="entry-line">
-                <time class="timestamp" data-time="{{.CreatedAt}}"
-                  >{{when .CreatedAt}}</time
-                ><span class="outcome {{.Kind}}">{{outcome .}}</span>
-              </div>
-              <h3>
-                {{if $.LibraryURL}}<a href="{{bookURL $.LibraryURL .BookID}}"
-                  >{{if .Title}}{{.Title}}{{else}}Book {{.BookID}}{{end}}</a
-                >{{else}}{{if .Title}}{{.Title}}{{else}}Book
-                {{.BookID}}{{end}}{{end}}
-              </h3>
-              {{if .Message}}
-              <p class="entry-message">{{.Message}}</p>
-              {{end}} {{if or .Details.Changes .Details.GroupReason
-              .Details.Warnings .Details.Error .Details.CoverChanged
-              .Details.MovedFiles .Details.MergedBooks}}
-              <details>
-                <summary>Details</summary>
-                <div class="entry-details">
-                  {{if .Details.GroupReason}}
-                  <p>
-                    <strong>Related books.</strong> {{.Details.GroupReason}}
-                  </p>
-                  {{end}}{{if .Details.CoverChanged}}
-                  <p>
-                    {{if eq .Kind "planned"}}A cover replacement is selected in
-                    the saved plan.{{else}}The selected cover was
-                    applied.{{end}}
-                  </p>
-                  {{if .Details.CoverSource}}
-                  <p class="source">Cover source: {{.Details.CoverSource}}</p>
-                  {{end}} {{end}}{{if .Details.Sources}}
-                  <p class="source">
-                    Sources: {{range $i,$source:=.Details.Sources}}{{if $i}},
-                    {{end}}{{$source}}{{end}}
-                  </p>
-                  {{end}}{{if .Details.MovedFiles}}
-                  <p>{{.Details.MovedFiles}} file(s) organized.</p>
-                  {{end}}{{if .Details.MergedBooks}}
-                  <p>
-                    Alternate formats grouped from book entries
-                    {{.Details.MergedBooks}}.
-                  </p>
-                  {{end}}{{if .Details.Changes}}
-                  <div class="changes">
-                    {{range .Details.Changes}}
-                    <section class="change">
-                      <h4>{{field .Field}}</h4>
-                      <div class="before-after">
-                        <div>
-                          <span>Before</span>
-                          <p>{{value .Before}}</p>
-                        </div>
-                        <div>
-                          <span>Selected</span>
-                          <p>{{value .After}}</p>
-                        </div>
-                      </div>
-                      {{if .Source}}
-                      <p class="source">Source: {{.Source}}</p>
-                      {{end}}
-                    </section>
-                    {{end}}
-                  </div>
-                  {{end}}{{if .Details.Warnings}}
-                  <h4>Source warnings</h4>
-                  <ul>
-                    {{range .Details.Warnings}}
-                    <li>{{.}}</li>
-                    {{end}}
-                  </ul>
-                  {{end}}{{if .Details.Error}}
-                  <p class="error">{{.Details.Error}}</p>
-                  {{end}}
-                </div>
-              </details>
-              {{end}}
-            </article>
-            {{else}}
-            <div class="empty">
-              <h3>No entries yet.</h3>
-              <p>The worker will record its next result here.</p>
-            </div>
-            {{end}} {{if .Next}}<a
-              class="older"
-              href="/?before={{.Next}}{{if .History}}&amp;history=all{{end}}"
-              >Older entries</a
-            >{{end}}
-          </section>
-        </div>
+          </div>
+        </details>
+        {{else}}
+        <p class="empty">No activity matches this filter.</p>
+        {{end}}
+      </section>
+      <div class="log-footer">
+        {{if .Next}}<a
+          href="/?before={{.Next}}&amp;filter={{.Filter}}{{if .History}}&amp;history=all{{end}}"
+          >Older entries</a
+        >{{end}}<span
+          >Refreshes every 30 seconds while entries are closed.</span
+        >
       </div>
+      <details class="definitions">
+        <summary>How changes and completeness are counted</summary>
+        <p>
+          Major update: at least three bibliographic fields changed, or a cover
+          replacement plus a bibliographic change. Provider links are counted
+          separately. “No metadata change” includes file-only organization.
+        </p>
+        <p>
+          Completeness counts nine populated fields: title, authors,
+          description, language, publisher, publication date/year, page count,
+          ISBN and genres. Optional series/subtitle and provider links are
+          excluded. It measures missing data, not quality. Counts above use each
+          job’s latest outcome; the log also retains retries. Before/after
+          values come from saved pre-write records and selected patches; planned
+          entries are not counted as applied changes.
+        </p>
+        <p>
+          Thumbnails are current BookOrbit covers unless labeled Before/After.
+          Historical images from before capture was enabled are unavailable.
+        </p>
+      </details>
     </main>
-    <footer>
-      Summaries are generated from saved events. Expand an event for metadata
-      and source details.
-    </footer>
   </body>
 </html>

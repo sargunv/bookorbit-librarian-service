@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	activityColumns = `id,job_id,book_id,policy,kind,stage,title,message,details,created_at`
+	activityColumns = `id,job_id,book_id,policy,kind,stage,title,message,details,created_at,coalesce((SELECT json_object('metadata',json_extract(proposal,'$.book.metadata'),'patch',json_extract(proposal,'$.patch')) FROM jobs WHERE id=a.job_id AND proposal IS NOT NULL),'null')`
 	visibleKinds    = `('applied','skipped','retry','failed','planned')`
 )
 
@@ -59,6 +59,8 @@ func eventForJob(j Job, kind, message string) domain.ActivityEvent {
 		}
 		sort.Strings(e.Details.Sources)
 		if kind == "applied" || kind == "planned" {
+			coverage := domain.MetadataCoverage(p.Book.Metadata, p.Patch)
+			e.Details.Coverage = &coverage
 			raw, _ := json.Marshal(p.Book.Metadata)
 			before := map[string]json.RawMessage{}
 			_ = json.Unmarshal(raw, &before)
@@ -102,16 +104,26 @@ func eventForJob(j Job, kind, message string) domain.ActivityEvent {
 
 func readEvent(row scanner) (domain.ActivityEvent, error) {
 	var e domain.ActivityEvent
-	var raw string
-	err := row.Scan(&e.ID, &e.JobID, &e.BookID, &e.Policy, &e.Kind, &e.Stage, &e.Title, &e.Message, &raw, &e.CreatedAt)
+	var raw, snapshot string
+	err := row.Scan(&e.ID, &e.JobID, &e.BookID, &e.Policy, &e.Kind, &e.Stage, &e.Title, &e.Message, &raw, &e.CreatedAt, &snapshot)
 	if err == nil {
 		err = json.Unmarshal([]byte(raw), &e.Details)
+	}
+	if err == nil && e.Details.Coverage == nil && (e.Kind == "applied" || e.Kind == "planned") && snapshot != "null" {
+		var saved struct {
+			Metadata domain.Metadata `json:"metadata"`
+			Patch    domain.Patch    `json:"patch"`
+		}
+		if json.Unmarshal([]byte(snapshot), &saved) == nil {
+			coverage := domain.MetadataCoverage(saved.Metadata, saved.Patch)
+			e.Details.Coverage = &coverage
+		}
 	}
 	return e, err
 }
 
 func (s *Store) Activity(ctx context.Context, policy string, before int64, limit int) ([]domain.ActivityEvent, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+activityColumns+` FROM activity WHERE (?='' OR policy=?) AND kind IN `+visibleKinds+` AND (?=0 OR id<?) ORDER BY id DESC LIMIT ?`, policy, policy, before, before, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+activityColumns+` FROM activity a WHERE (?='' OR policy=?) AND kind IN `+visibleKinds+` AND (?=0 OR id<?) ORDER BY id DESC LIMIT ?`, policy, policy, before, before, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +140,7 @@ func (s *Store) Activity(ctx context.Context, policy string, before int64, limit
 }
 
 func (s *Store) ActivityAfter(ctx context.Context, policy string, after int64, limit int) ([]domain.ActivityEvent, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+activityColumns+` FROM activity WHERE policy=? AND kind IN `+visibleKinds+` AND id>? ORDER BY id LIMIT ?`, policy, after, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+activityColumns+` FROM activity a WHERE policy=? AND kind IN `+visibleKinds+` AND id>? ORDER BY id LIMIT ?`, policy, after, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +192,7 @@ func (s *Store) PolicyCounts(ctx context.Context, policy string) (map[string]int
 }
 
 func (s *Store) Summaries(ctx context.Context, policy string, limit int) ([]domain.ActivitySummary, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,summary,created_at FROM activity_summaries WHERE policy=? ORDER BY id DESC LIMIT ?`, policy, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,summary,created_at FROM activity_summaries WHERE (?='' OR policy=?) ORDER BY id DESC LIMIT ?`, policy, policy, limit)
 	if err != nil {
 		return nil, err
 	}

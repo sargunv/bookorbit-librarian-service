@@ -169,13 +169,28 @@ restart. Stop the unit for a durable maintenance pause.
 
 ## Activity page
 
-The optional read-only web page shows compact LLM change-log entries, live
-worker phases, current-pass progress, and expandable entries with before/after
-metadata, source provenance, cover choices, retries and file-operation results.
-Each entry states what changed, why and which sources supported it. Entries link
-to the underlying events. It refreshes every 30 seconds while entries are
-closed; opening details pauses refresh. All-pass history and older entries
-remain accessible.
+The read-only dashboard presents recorded activity as structured rows: book
+thumbnail, outcome, added/updated field badges, metadata completeness before and
+after, and source providers. Filters isolate major updates, cover replacements,
+description changes, provider-link-only edits, unchanged metadata and unresolved
+errors. Open a row for its cached LLM explanation and complete field/source
+diff; there is no separate prose stream. Retry events remain visible and are
+marked recovered after a later successful outcome.
+
+Completeness counts nine populated fields (title, authors, description,
+language, publisher, publication date/year, page count, ISBN and genres).
+Optional series/subtitle and provider links are excluded. It measures missing
+data, not correctness. A major update changes at least three bibliographic
+fields, or a cover plus a bibliographic field. Dashboard counters use each job's
+latest outcome; filter counts count activity events. Historical completeness is
+derived from saved proposals when it was not recorded on the event.
+
+Cover thumbnails are served privately from BookOrbit with a five-minute cache.
+New cover replacements save small before/after images under `activity-covers/`
+next to the SQLite database. They persist across restarts. Earlier before images
+cannot be reconstructed; the UI labels the fallback as the current cover.
+Capture failures do not block curation. The page refreshes every 30 seconds
+while entries are closed; pagination and open details pause refresh.
 
 Set `UI_PROXY_TOKEN` to a separate secret of at least 24 characters. Put the
 service behind an authenticating reverse proxy such as Authelia and inject

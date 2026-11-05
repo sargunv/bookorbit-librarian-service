@@ -72,3 +72,37 @@ func TestSummaryAndHistoricalActivitySurviveRestart(t *testing.T) {
 		t.Fatalf("saved summary: %+v %v", summaries, err)
 	}
 }
+
+func TestHistoricalCoverageUsesSavedProposalWithoutRewritingEvents(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "events.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if _, err = s.Enqueue(ctx, []int{1}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	j, err := s.Claim(ctx, time.Minute, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := domain.Proposal{Book: domain.Book{Metadata: domain.Metadata{Title: "A Book"}}, Patch: domain.Patch{"description": []byte(`"Added description"`)}}
+	if err = s.Proposal(ctx, j.ID, p); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Finish(ctx, j.ID, "applied", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec(`UPDATE activity SET details=json_remove(details,'$.coverage')`); err != nil {
+		t.Fatal(err)
+	}
+	events, err := s.Activity(ctx, "test", 0, 30)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("events: %v %v", events, err)
+	}
+	c := events[0].Details.Coverage
+	if c == nil || c.Before != 1 || c.After != 2 {
+		t.Fatalf("historical coverage: %+v", c)
+	}
+}

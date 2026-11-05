@@ -16,6 +16,7 @@ type ActivityEvent struct {
 }
 
 type ActivityDetails struct {
+	Coverage     *Coverage     `json:"coverage,omitempty"`
 	Changes      []FieldChange `json:"changes,omitempty"`
 	Reason       string        `json:"reason,omitempty"`
 	GroupReason  string        `json:"groupReason,omitempty"`

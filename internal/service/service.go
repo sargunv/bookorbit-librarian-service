@@ -236,6 +236,14 @@ func (s *Service) process(ctx context.Context, j store.Job) (string, error) {
 	}
 	p.Patch = refreshed.Patch
 	p.CoverURL = refreshed.CoverURL
+	p.Book = current
+	p.Provenance = refreshed.Provenance
+	if e = s.db.Proposal(ctx, j.ID, *p); e != nil {
+		return "", e
+	}
+	if p.CoverURL != "" {
+		s.captureCover(ctx, j, "before")
+	}
 	s.progress(ctx, j, book.Metadata.Title, "applying", 0, 0)
 	if e = s.organizer.Backup(ctx, current); e != nil {
 		return "", e
@@ -279,6 +287,9 @@ func (s *Service) process(ctx context.Context, j store.Job) (string, error) {
 		if e != nil {
 			return "", e
 		}
+	}
+	if p.CoverURL != "" {
+		s.captureCover(ctx, j, "after")
 	}
 	return s.finish(ctx, j, "applied", "", result)
 }

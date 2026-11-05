@@ -41,17 +41,14 @@ var activityTemplate = template.Must(template.New("activity.html").Funcs(templat
 		}
 		return string(raw)
 	},
-	"field": func(raw string) string {
-		names := map[string]string{"isbn10": "ISBN-10", "isbn13": "ISBN-13", "hardcoverId": "Hardcover link", "hardcoverEditionId": "Hardcover edition", "goodreadsId": "Goodreads link", "googleBooksId": "Google Books link", "openLibraryId": "Open Library link", "publishedYear": "Publication year", "publishedDate": "Publication date", "pageCount": "Page count", "seriesName": "Series", "seriesIndex": "Series position"}
-		if label := names[raw]; label != "" {
-			return label
+	"field":  fieldName,
+	"signed": func(n int) string { return fmt.Sprintf("%+d", n) },
+	"percent": func(n, total int) int {
+		if total == 0 {
+			return 0
 		}
-		if raw == "" {
-			return raw
-		}
-		return strings.ToUpper(raw[:1]) + raw[1:]
+		return 100 * n / total
 	},
-	"outcome": eventOutcome,
 	"bookURL": func(base string, id int) string {
 		if base == "" {
 			return ""
@@ -60,38 +57,31 @@ var activityTemplate = template.Must(template.New("activity.html").Funcs(templat
 	},
 }).ParseFS(webFiles, "web/activity.html"))
 
-func eventOutcome(e domain.ActivityEvent) string {
-	switch e.Kind {
-	case "applied":
-		if len(e.Details.Changes) == 0 && !e.Details.CoverChanged {
-			if e.Details.MovedFiles > 0 || len(e.Details.MergedBooks) > 0 {
-				return "Files organized"
-			}
-			return "Metadata kept"
-		}
-		return "Updated"
-	case "retry":
-		return "Retry scheduled"
-	case "failed":
-		return "Needs attention"
-	case "skipped":
-		return "Skipped"
-	case "planned":
-		return "Plan saved"
-	}
-	return e.Kind
+type activityPage struct {
+	Counts                           map[string]int
+	Total, Completed, Percent        int
+	Paused                           bool
+	Active                           []domain.ActivityEvent
+	Rows                             []activityRow
+	Stats                            activityStats
+	Filters                          []activityFilter
+	SummaryError, LibraryURL, Filter string
+	Next                             int64
+	History                          bool
 }
 
-type activityPage struct {
-	Counts                    map[string]int
-	Total, Completed, Percent int
-	Paused                    bool
-	Active                    []domain.ActivityEvent
-	Events                    []domain.ActivityEvent
-	Summaries                 []domain.ActivitySummary
-	SummaryError, LibraryURL  string
-	Next                      int64
-	History                   bool
+func (s *Service) authorizeUI(w http.ResponseWriter, r *http.Request) bool {
+	if s.cfg.UIProxyToken == "" {
+		http.NotFound(w, r)
+		return false
+	}
+	proxy := r.Header.Get("X-Librarian-UI-Token")
+	admin := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if subtle.ConstantTimeCompare([]byte(proxy), []byte(s.cfg.UIProxyToken)) != 1 && (s.cfg.AdminToken == "" || subtle.ConstantTimeCompare([]byte(admin), []byte(s.cfg.AdminToken)) != 1) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	return true
 }
 
 func (s *Service) mountUI(mux *http.ServeMux) {
@@ -114,19 +104,12 @@ func (s *Service) mountUI(mux *http.ServeMux) {
 		w.Header().Set("Cache-Control", "public, max-age=300")
 		_, _ = w.Write(data)
 	})
+	mux.HandleFunc("GET /covers/{job}/{version}", s.thumbnail)
 	mux.HandleFunc("GET /{$}", s.activityPage)
 }
 
 func (s *Service) activityPage(w http.ResponseWriter, r *http.Request) {
-	// This is a separate, read-only capability. It never authenticates /v1/.
-	if s.cfg.UIProxyToken == "" {
-		http.NotFound(w, r)
-		return
-	}
-	proxy := r.Header.Get("X-Librarian-UI-Token")
-	admin := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if subtle.ConstantTimeCompare([]byte(proxy), []byte(s.cfg.UIProxyToken)) != 1 && (s.cfg.AdminToken == "" || subtle.ConstantTimeCompare([]byte(admin), []byte(s.cfg.AdminToken)) != 1) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if !s.authorizeUI(w, r) {
 		return
 	}
 	counts, err := s.db.PolicyCounts(r.Context(), curator.PolicyVersion)
@@ -153,17 +136,92 @@ func (s *Service) activityPage(w http.ResponseWriter, r *http.Request) {
 	if history {
 		policy = ""
 	}
-	events, err := s.db.Activity(r.Context(), policy, before, 30)
+	events, err := s.db.Activity(r.Context(), policy, 0, -1)
 	if err != nil {
 		http.Error(w, "activity unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	summaries, err := s.db.Summaries(r.Context(), curator.PolicyVersion, 3)
+	summaries, err := s.db.Summaries(r.Context(), policy, 1000)
 	if err != nil {
 		http.Error(w, "summaries unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	page := activityPage{Counts: counts, Paused: s.paused.Load(), Active: active, Events: events, Summaries: summaries, LibraryURL: s.cfg.BookOrbitPublicURL, History: history}
+	filter := r.URL.Query().Get("filter")
+	if filter == "" {
+		filter = "all"
+	}
+	filters := []activityFilter{{Key: "all", Label: "All activity"}, {Key: "major", Label: "Major changes"}, {Key: "covers", Label: "Covers"}, {Key: "descriptions", Label: "Descriptions"}, {Key: "links", Label: "Links only"}, {Key: "unchanged", Label: "No metadata change"}, {Key: "issues", Label: "Errors"}}
+	valid := false
+	for _, f := range filters {
+		valid = valid || f.Key == filter
+	}
+	if !valid {
+		http.Error(w, "invalid activity filter", 400)
+		return
+	}
+	page := activityPage{Counts: counts, Paused: s.paused.Load(), Active: active, LibraryURL: s.cfg.BookOrbitPublicURL, History: history, Filter: filter, Filters: filters}
+	explanations := map[int64]string{}
+	for _, summary := range summaries {
+		for _, highlight := range summary.Highlights {
+			for _, id := range highlight.EventIDs {
+				if explanations[id] == "" {
+					explanations[id] = highlight.Text
+				}
+			}
+		}
+	}
+	latest := map[int64]domain.ActivityEvent{}
+	for _, event := range events {
+		if _, ok := latest[event.JobID]; !ok {
+			latest[event.JobID] = event
+		}
+	}
+	for _, event := range events {
+		row := activityView(event)
+		last := latest[event.JobID]
+		row.Recovered = event.Kind == "retry" && (last.Kind == "applied" || last.Kind == "skipped")
+		if row.Recovered {
+			row.Label = "Recovered retry"
+		}
+		row.Explanation = explanations[event.ID]
+		row.BeforeCover = s.hasCover(event.JobID, "before")
+		row.AfterCover = s.hasCover(event.JobID, "after")
+		for i := range page.Filters {
+			if matchesFilter(row, page.Filters[i].Key) {
+				page.Filters[i].Count++
+			}
+			page.Filters[i].Selected = page.Filters[i].Key == filter
+		}
+		if event.ID == last.ID {
+			if event.Kind == "applied" {
+				switch row.Impact {
+				case "major":
+					page.Stats.Major++
+					page.Stats.Metadata++
+				case "metadata":
+					page.Stats.Metadata++
+				case "links":
+					page.Stats.Links++
+				case "files", "unchanged":
+					page.Stats.Unchanged++
+				}
+				if event.Details.CoverChanged {
+					page.Stats.Covers++
+				}
+				page.Stats.Filled += row.Delta
+			}
+			if row.Impact == "issues" && !row.Recovered {
+				page.Stats.Issues++
+			}
+		}
+		if (before == 0 || event.ID < before) && matchesFilter(row, filter) {
+			page.Rows = append(page.Rows, row)
+		}
+	}
+	if len(page.Rows) > 30 {
+		page.Rows = page.Rows[:30]
+		page.Next = page.Rows[29].ID
+	}
 	for _, count := range counts {
 		page.Total += count
 	}
@@ -171,15 +229,12 @@ func (s *Service) activityPage(w http.ResponseWriter, r *http.Request) {
 	if page.Total > 0 {
 		page.Percent = 100 * page.Completed / page.Total
 	}
-	if len(events) == 30 {
-		page.Next = events[len(events)-1].ID
-	}
 	s.summaryMu.RLock()
 	page.SummaryError = s.summaryError
 	s.summaryMu.RUnlock()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if err = activityTemplate.Execute(w, page); err != nil {
 		return
