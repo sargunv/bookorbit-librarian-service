@@ -85,7 +85,8 @@ podman build --build-arg VERSION=local -t localhost/bookorbit-librarian .
 podman run --rm --env-file /private/librarian.env \
   --user 1026:100 --read-only --tmpfs /tmp \
   -v /private/librarian-state:/data \
-  -v /your/books-parent:/books \
+  -v /your/library:/books \
+  -v /your/originals:/originals \
   localhost/bookorbit-librarian
 ```
 
@@ -325,6 +326,15 @@ matching database/application backup, then restore original book bytes to the
 paths in the manifests. Verify those paths stay under your library root. SQLite
 is the job/evidence store and must be backed up too (stop the service or use
 SQLite's backup API).
+
+When changing library mounts or directory names, stop both services, checkpoint
+their state and confirm that no move journals remain. Update BookOrbit's live
+absolute paths together with the mounts and `LIBRARY_ROOT`/`ORIGINALS_ROOT`.
+Relative file paths and original backup copy names remain valid. Preserve
+historical manifests, jobs and applied plans as evidence; record an explicit
+old-to-new prefix mapping for restoration rather than rewriting that history.
+Restoring a pre-migration database requires its matching directory layout and
+container mounts.
 
 A library with unprocessed or unresolved flat files is not yet safe for a folder
 scan. Keep scans disabled through the initial pass; resolve remaining jobs
