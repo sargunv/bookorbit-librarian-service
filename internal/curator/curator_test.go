@@ -19,7 +19,7 @@ func TestSourcesEditionAndLocks(t *testing.T) {
 	book := domain.Book{LockedFields: []string{"title", "cover"}, Metadata: domain.Metadata{Title: "Keep", ISBN13: "original"}}
 	candidates := []domain.Candidate{
 		{Provider: "hardcover", ProviderID: "work", HardcoverEditionID: "edition", Metadata: domain.Metadata{Title: "New", Description: "Short", ISBN13: "wrong edition"}, CoverURL: "https://example.com/a.jpg"},
-		{Provider: "goodreads", ProviderID: "other", Metadata: domain.Metadata{Description: "<p>First &amp; true.</p><p>Second.</p>", ISBN13: "right edition"}},
+		{Provider: "goodreads", ProviderID: "other", Metadata: domain.Metadata{Description: "<p>First &amp; true.</p><p>Second.</p>", ISBN13: "9780306406157"}},
 	}
 	decision := domain.Decision{Match: 1, WorkSources: []int{1, 2}, EditionSources: []int{2}, CoverSource: 1, FieldSources: map[string]int{"title": 1, "description": 2, "isbn13": 2}}
 	p, err := BuildProposal(book, candidates, decision)
@@ -32,7 +32,7 @@ func TestSourcesEditionAndLocks(t *testing.T) {
 	if string(p.Patch["description"]) != `"First \u0026 true.\n\nSecond."` || p.Provenance["description"] != "goodreads/other" {
 		t.Fatalf("description: %s %+v", p.Patch["description"], p.Provenance)
 	}
-	if string(p.Patch["isbn13"]) != `"right edition"` {
+	if string(p.Patch["isbn13"]) != `"9780306406157"` {
 		t.Fatal("wrong edition value")
 	}
 	if _, ok := p.Patch["hardcoverEditionId"]; ok {

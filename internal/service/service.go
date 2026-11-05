@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,19 +27,23 @@ import (
 )
 
 type Service struct {
-	cfg          config.Config
-	db           *store.Store
-	books        *bookorbit.Client
-	judge        *curator.Curator
-	organizer    *organize.Organizer
-	paused       atomic.Bool
-	applyMu      sync.Mutex
-	planMu       sync.Mutex
-	discoveryMu  sync.Mutex
-	discovery    *domain.Discovery
-	summaryMu    sync.RWMutex
-	summaryError string
-	wg           sync.WaitGroup
+	cfg            config.Config
+	db             *store.Store
+	books          *bookorbit.Client
+	judge          *curator.Curator
+	organizer      *organize.Organizer
+	paused         atomic.Bool
+	applyMu        sync.Mutex
+	planMu         sync.Mutex
+	discoveryMu    sync.Mutex
+	discovery      *domain.Discovery
+	summaryMu      sync.RWMutex
+	summaryError   string
+	wg             sync.WaitGroup
+	reconcileMu    sync.Mutex
+	lastReconcile  time.Time
+	needsReconcile atomic.Bool
+	reconcileError atomic.Value
 }
 
 func New(c config.Config) (*Service, error) {
@@ -60,6 +68,7 @@ func New(c config.Config) (*Service, error) {
 func (s *Service) Close() error { s.wg.Wait(); return errors.Join(s.organizer.Close(), s.db.Close()) }
 
 func (s *Service) Start(ctx context.Context) {
+	s.needsReconcile.Store(true)
 	if s.cfg.UIProxyToken != "" {
 		s.wg.Add(1)
 		go func() { defer s.wg.Done(); s.summarizeActivity(ctx) }()
@@ -117,6 +126,7 @@ func (s *Service) work(ctx context.Context) {
 		}
 		j, e := s.db.Claim(ctx, s.cfg.JobTimeout+time.Minute, s.cfg.MaxAttempts)
 		if errors.Is(e, sql.ErrNoRows) {
+			s.reconcileIdle(ctx)
 			select {
 			case <-ctx.Done():
 				return
@@ -145,6 +155,7 @@ func (s *Service) work(ctx context.Context) {
 			}
 			slog.Warn("job attempt failed", "job", j.ID, "attempt", j.Attempts)
 		} else {
+			s.needsReconcile.Store(true)
 			slog.Info("job finished", "job", j.ID, "book", j.BookID, "status", status)
 		}
 	}
@@ -291,7 +302,73 @@ func (s *Service) process(ctx context.Context, j store.Job) (string, error) {
 	if p.CoverURL != "" {
 		s.captureCover(ctx, j, "after")
 	}
+	after, e := s.books.Book(ctx, j.BookID)
+	if e != nil {
+		return "", e
+	}
+	if e = verifyPatch(after, p.Patch); e != nil {
+		return "", e
+	}
 	return s.finish(ctx, j, "applied", "", result)
+}
+
+// Reconcile only after the curation queue has settled. Failed/planned work
+// prevents merging incomplete records; retry a durable failed plan unchanged.
+func (s *Service) reconcileIdle(ctx context.Context) {
+	if !s.cfg.Organize || !s.cfg.AutoApply || !s.needsReconcile.Load() || !s.reconcileMu.TryLock() {
+		return
+	}
+	defer s.reconcileMu.Unlock()
+	if time.Since(s.lastReconcile) < time.Minute {
+		return
+	}
+	counts, err := s.db.PolicyCounts(ctx, curator.PolicyVersion)
+	if err != nil {
+		return
+	}
+	for _, status := range []string{"pending", "running", "failed", "planned"} {
+		if counts[status] > 0 {
+			return
+		}
+	}
+	if !s.needsReconcile.Swap(false) {
+		return
+	}
+	s.lastReconcile = time.Now()
+	path := filepath.Join(filepath.Dir(s.cfg.StatePath), "reconcile-pending.json")
+	bounded, cancel := context.WithTimeout(ctx, s.cfg.JobTimeout)
+	defer cancel()
+	report, err := s.ReconcileFile(bounded, path, true, "")
+	if err != nil {
+		s.needsReconcile.Store(true)
+		s.reconcileError.Store(err.Error())
+		slog.Error("reconciliation failed", "error", err.Error())
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err == nil {
+		sum := sha256.Sum256(data)
+		history := filepath.Join(filepath.Dir(path), "reconcile-history")
+		err = os.MkdirAll(history, 0o700)
+		if err == nil {
+			err = os.Rename(path, filepath.Join(history, fmt.Sprintf("%x.json", sum)))
+		}
+	}
+	if err != nil {
+		s.needsReconcile.Store(true)
+		s.reconcileError.Store("reconciliation history persistence failed")
+		slog.Error("reconciliation history persistence failed")
+		return
+	}
+	s.reconcileError.Store("")
+	slog.Info("reconciliation verified", "groups", report.Groups, "merged", report.Merged)
+}
+
+func (s *Service) reconciliationError() string {
+	if value := s.reconcileError.Load(); value != nil {
+		return value.(string)
+	}
+	return ""
 }
 
 func (s *Service) Handler() http.Handler {
@@ -320,7 +397,8 @@ func (s *Service) Handler() http.Handler {
 			Paused                             bool           `json:"paused"`
 			Policy, VisionModel, MetadataModel string
 			AutoApply, Organize                bool
-		}{counts, s.paused.Load(), curator.PolicyVersion, s.cfg.VisionModel, s.cfg.MetadataModel, s.cfg.AutoApply, s.cfg.Organize})
+			ReconciliationError                string `json:"reconciliationError,omitempty"`
+		}{counts, s.paused.Load(), curator.PolicyVersion, s.cfg.VisionModel, s.cfg.MetadataModel, s.cfg.AutoApply, s.cfg.Organize, s.reconciliationError()})
 	})
 	private.HandleFunc("POST /v1/pause", func(w http.ResponseWriter, r *http.Request) {
 		s.paused.Store(true)

@@ -19,6 +19,7 @@ type (
 		Missing                    string
 		BeforeCover, AfterCover    bool
 		Recovered                  bool
+		CanonicalBookID            int
 	}
 )
 
@@ -32,7 +33,7 @@ type (
 )
 
 func activityView(e domain.ActivityEvent) activityRow {
-	r := activityRow{ActivityEvent: e}
+	r := activityRow{ActivityEvent: e, CanonicalBookID: e.BookID}
 	metadata, links := 0, 0
 	for _, change := range e.Details.Changes {
 		if isLink(change.Field) {

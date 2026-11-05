@@ -48,6 +48,9 @@ func Open(path string) (*Store, error) {
  CREATE INDEX IF NOT EXISTS activity_job ON activity(job_id,id);
  CREATE TABLE IF NOT EXISTS activity_summaries(id INTEGER PRIMARY KEY,policy TEXT NOT NULL,to_event INTEGER NOT NULL,summary TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),UNIQUE(policy,to_event));
  CREATE TABLE IF NOT EXISTS discovery(policy TEXT PRIMARY KEY,plan TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS book_aliases(old_id INTEGER PRIMARY KEY,book_id INTEGER NOT NULL);
+ CREATE TABLE IF NOT EXISTS reconciliations(run TEXT NOT NULL,book_id INTEGER NOT NULL,event TEXT NOT NULL,PRIMARY KEY(run,book_id));
+ CREATE TABLE IF NOT EXISTS reconciled_covers(book_id INTEGER PRIMARY KEY,url TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS jobs_claim ON jobs(status,available_at,id);`)
 	if err != nil {
 		_ = db.Close()

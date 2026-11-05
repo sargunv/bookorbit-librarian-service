@@ -66,6 +66,7 @@ type activityPage struct {
 	Stats                            activityStats
 	Filters                          []activityFilter
 	SummaryError, LibraryURL, Filter string
+	ReconciliationError              string
 	Next                             int64
 	History                          bool
 }
@@ -159,7 +160,7 @@ func (s *Service) activityPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid activity filter", 400)
 		return
 	}
-	page := activityPage{Counts: counts, Paused: s.paused.Load(), Active: active, LibraryURL: s.cfg.BookOrbitPublicURL, History: history, Filter: filter, Filters: filters}
+	page := activityPage{ReconciliationError: s.reconciliationError(), Counts: counts, Paused: s.paused.Load(), Active: active, LibraryURL: s.cfg.BookOrbitPublicURL, History: history, Filter: filter, Filters: filters}
 	explanations := map[int64]string{}
 	for _, summary := range summaries {
 		for _, highlight := range summary.Highlights {
@@ -178,6 +179,9 @@ func (s *Service) activityPage(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, event := range events {
 		row := activityView(event)
+		if id, e := s.db.ResolveBook(r.Context(), event.BookID); e == nil {
+			row.CanonicalBookID = id
+		}
 		last := latest[event.JobID]
 		row.Recovered = event.Kind == "retry" && (last.Kind == "applied" || last.Kind == "skipped")
 		if row.Recovered {

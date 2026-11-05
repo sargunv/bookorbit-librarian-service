@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -55,8 +57,8 @@ func run() error {
 	if command == "request" {
 		return request()
 	}
-	if command != "serve" {
-		return errors.New("usage: librarian [serve|version|health|request METHOD /v1/path [JSON]]")
+	if command != "serve" && command != "reconcile" {
+		return errors.New("usage: librarian [serve|version|health|reconcile --plan PATH [--apply] [--recovery PATH]|request METHOD /v1/path [JSON]]")
 	}
 	c, e := config.Load()
 	if e != nil {
@@ -68,6 +70,27 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if command == "reconcile" {
+		flags := flag.NewFlagSet("reconcile", flag.ContinueOnError)
+		plan := flags.String("plan", "", "private durable plan path")
+		apply := flags.Bool("apply", false, "apply and verify the saved plan")
+		recovery := flags.String("recovery", "", "private reference snapshot exported from a pre-merge backup")
+		if err := flags.Parse(os.Args[2:]); err != nil {
+			return err
+		}
+		if *plan == "" {
+			return errors.New("reconcile requires --plan")
+		}
+		report, err := svc.ReconcileFile(ctx, *plan, *apply, *recovery)
+		closeErr := svc.Close()
+		if err != nil {
+			return errors.Join(err, closeErr)
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		return json.NewEncoder(os.Stdout).Encode(report)
+	}
 	svc.Start(ctx)
 	srv := &http.Server{Addr: c.Listen, Handler: svc.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 3 * time.Minute, IdleTimeout: 60 * time.Second}
 	go func() {

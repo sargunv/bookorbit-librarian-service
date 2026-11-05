@@ -78,49 +78,6 @@ func TestPathPolicyRejectsEscapesAndSymlinks(t *testing.T) {
 	}
 }
 
-func TestEditionMatching(t *testing.T) {
-	a := domain.Book{LibraryID: 1, Metadata: domain.Metadata{Title: "A Book", Language: "English", ISBN13: "978-123", Authors: []string{"A. Writer"}}}
-	b := a
-	b.Metadata.Title = "A BOOK"
-	b.Metadata.ISBN13 = "978123"
-	if !match(a, b) {
-		t.Fatal("expected ISBN match")
-	}
-	b.Metadata.Language = "French"
-	if match(a, b) {
-		t.Fatal("different language matched")
-	}
-	b = a
-	b.Metadata.Authors = []string{"Someone Else"}
-	if match(a, b) {
-		t.Fatal("different authors matched")
-	}
-	b = a
-	b.LibraryID = 2
-	if match(a, b) {
-		t.Fatal("cross-library match")
-	}
-	b = a
-	b.HardcoverEditionID = "2"
-	a.HardcoverEditionID = "1"
-	if match(a, b) {
-		t.Fatal("conflicting editions matched by ISBN")
-	}
-	b.HardcoverEditionID = "1"
-	b.Metadata.Title = "Different"
-	if !match(a, b) {
-		t.Fatal("same edition ID should match")
-	}
-	a.HardcoverEditionID = ""
-	b.HardcoverEditionID = ""
-	a.Metadata.ISBN13 = ""
-	b.Metadata.ISBN13 = ""
-	b.Metadata.Title = a.Metadata.Title
-	if match(a, b) {
-		t.Fatal("title alone matched")
-	}
-}
-
 func TestDestinationClaimDoesNotOverwrite(t *testing.T) {
 	d := t.TempDir()
 	src := filepath.Join(d, "source")

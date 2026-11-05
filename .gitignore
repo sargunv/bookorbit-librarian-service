@@ -3,3 +3,5 @@
 /.env
 /*.db*
 /ca-certificates.crt
+
+__pycache__/

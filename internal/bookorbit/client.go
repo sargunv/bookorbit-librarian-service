@@ -147,10 +147,11 @@ func bookPath(id int) string { return "/books/" + strconv.Itoa(id) }
 func (c *Client) Book(ctx context.Context, id int) (domain.Book, error) {
 	var raw struct {
 		domain.Metadata
-		ID        int    `json:"id"`
-		LibraryID int    `json:"libraryId"`
-		UpdatedAt string `json:"updatedAt"`
-		Authors   []struct {
+		ID              int    `json:"id"`
+		LibraryID       int    `json:"libraryId"`
+		LibraryFolderID int    `json:"libraryFolderId"`
+		UpdatedAt       string `json:"updatedAt"`
+		Authors         []struct {
 			Name string `json:"name"`
 		} `json:"authors"`
 		Files              []domain.File     `json:"files"`
@@ -165,7 +166,7 @@ func (c *Client) Book(ctx context.Context, id int) (domain.Book, error) {
 	for _, a := range raw.Authors {
 		raw.Metadata.Authors = append(raw.Metadata.Authors, a.Name)
 	}
-	return domain.Book{ID: raw.ID, LibraryID: raw.LibraryID, UpdatedAt: raw.UpdatedAt, Metadata: raw.Metadata, Files: raw.Files, ProviderIDs: raw.ProviderIDs, HardcoverEditionID: raw.HardcoverEditionID, LockedFields: raw.LockedFields}, nil
+	return domain.Book{ID: raw.ID, LibraryID: raw.LibraryID, LibraryFolderID: raw.LibraryFolderID, UpdatedAt: raw.UpdatedAt, Metadata: raw.Metadata, Files: raw.Files, ProviderIDs: raw.ProviderIDs, HardcoverEditionID: raw.HardcoverEditionID, LockedFields: raw.LockedFields}, nil
 }
 
 func (c *Client) ListBooks(ctx context.Context, libraryID int) ([]int, error) {

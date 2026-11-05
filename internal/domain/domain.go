@@ -32,6 +32,7 @@ type File struct {
 type Book struct {
 	ID                 int               `json:"id"`
 	LibraryID          int               `json:"libraryId"`
+	LibraryFolderID    int               `json:"libraryFolderId"`
 	UpdatedAt          string            `json:"updatedAt"`
 	Metadata           Metadata          `json:"metadata"`
 	Files              []File            `json:"files"`

@@ -12,7 +12,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -313,49 +312,6 @@ func (o *Organizer) backup(ctx context.Context, b domain.Book) error {
 	return nil
 }
 
-func normalized(s string) string {
-	return strings.Join(strings.FieldsFunc(strings.ToLower(s), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }), " ")
-}
-
-func match(a, b domain.Book) bool {
-	if a.LibraryID != b.LibraryID {
-		return false
-	}
-	ea, eb := strings.TrimSpace(a.HardcoverEditionID), strings.TrimSpace(b.HardcoverEditionID)
-	if ea != "" && eb != "" {
-		return ea == eb
-	}
-	ma, mb := a.Metadata, b.Metadata
-	isbn := func(s string) string {
-		return strings.ReplaceAll(strings.ReplaceAll(strings.ToUpper(s), "-", ""), " ", "")
-	}
-	same := false
-	for _, x := range []string{ma.ISBN10, ma.ISBN13} {
-		for _, y := range []string{mb.ISBN10, mb.ISBN13} {
-			if isbn(x) != "" && isbn(x) == isbn(y) {
-				same = true
-			}
-		}
-	}
-	if !same || normalized(ma.Title) == "" || normalized(ma.Title) != normalized(mb.Title) || normalized(ma.Language) == "" || normalized(ma.Language) != normalized(mb.Language) || len(ma.Authors) == 0 || len(mb.Authors) == 0 {
-		return false
-	}
-	aa, bb := make([]string, 0, len(ma.Authors)), make([]string, 0, len(mb.Authors))
-	for _, v := range ma.Authors {
-		if normalized(v) != "" {
-			aa = append(aa, normalized(v))
-		}
-	}
-	for _, v := range mb.Authors {
-		if normalized(v) != "" {
-			bb = append(bb, normalized(v))
-		}
-	}
-	sort.Strings(aa)
-	sort.Strings(bb)
-	return len(aa) > 0 && strings.Join(aa, "\x00") == strings.Join(bb, "\x00")
-}
-
 func component(s, fallback string) string {
 	s = strings.TrimSpace(strings.Map(func(r rune) rune {
 		if r == '/' || r == '\\' || unicode.IsControl(r) {
@@ -375,7 +331,7 @@ func component(s, fallback string) string {
 }
 
 func (o *Organizer) records(ctx context.Context, tx *sql.Tx, library int) ([]record, error) {
-	rows, e := tx.QueryContext(ctx, `SELECT b.id,b.library_id,b.library_folder_id,lf.path,b.folder_path,coalesce(m.title,''),coalesce(m.subtitle,''),coalesce(m.description,''),coalesce(m.publisher,''),coalesce(m.published_date::text,''),coalesce(m.published_year,0),coalesce(m.page_count,0),coalesce(m.series_index,''),coalesce(m.series_name,''),coalesce(m.language,''),coalesce(m.isbn10,''),coalesce(m.isbn13,''),coalesce(m.hardcover_edition_id,''),coalesce((SELECT string_agg(a.name, E'\x1f' ORDER BY ba.display_order,a.id) FROM book_authors ba JOIN authors a ON a.id=ba.author_id WHERE ba.book_id=b.id),'') FROM books b JOIN library_folders lf ON lf.id=b.library_folder_id LEFT JOIN book_metadata m ON m.book_id=b.id WHERE b.library_id=$1 ORDER BY b.id FOR UPDATE OF b`, library)
+	rows, e := tx.QueryContext(ctx, `SELECT b.id,b.library_id,b.library_folder_id,lf.path,b.folder_path,coalesce(m.title,''),coalesce(m.subtitle,''),coalesce(m.description,''),coalesce(m.publisher,''),coalesce(m.published_date::text,''),coalesce(m.published_year,0),coalesce(m.page_count,0),coalesce(m.series_index,''),coalesce(m.series_name,''),coalesce(m.language,''),coalesce(m.isbn10,''),coalesce(m.isbn13,''),coalesce(m.hardcover_edition_id,''),coalesce((SELECT string_agg(a.name, E'\x1f' ORDER BY ba.display_order,a.id) FROM book_authors ba JOIN authors a ON a.id=ba.author_id WHERE ba.book_id=b.id),''),(jsonb_strip_nulls(jsonb_build_object('hardcover',m.hardcover_id,'goodreads',m.goodreads_id,'google',m.google_books_id,'openlibrary',m.open_library_id)) || coalesce((SELECT jsonb_object_agg(provider,external_id) FROM book_provider_ids WHERE book_id=b.id),'{}'::jsonb))::text,coalesce(array_to_json(m.locked_fields)::text,'[]'),coalesce((SELECT json_agg(g.name ORDER BY g.name)::text FROM book_genres bg JOIN genres g ON g.id=bg.genre_id WHERE bg.book_id=b.id),'[]') FROM books b JOIN library_folders lf ON lf.id=b.library_folder_id LEFT JOIN book_metadata m ON m.book_id=b.id WHERE b.library_id=$1 ORDER BY b.id FOR UPDATE OF b`, library)
 	if e != nil {
 		return nil, e
 	}
@@ -383,13 +339,23 @@ func (o *Organizer) records(ctx context.Context, tx *sql.Tx, library int) ([]rec
 	var out []record
 	for rows.Next() {
 		var r record
-		var authors string
+		var authors, providers, locks, genres string
 		m := &r.book.Metadata
-		if e = rows.Scan(&r.book.ID, &r.book.LibraryID, &r.folderID, &r.folderRoot, &r.folder, &m.Title, &m.Subtitle, &m.Description, &m.Publisher, &m.PublishedDate, &m.PublishedYear, &m.PageCount, &m.SeriesIndex, &m.SeriesName, &m.Language, &m.ISBN10, &m.ISBN13, &r.book.HardcoverEditionID, &authors); e != nil {
+		if e = rows.Scan(&r.book.ID, &r.book.LibraryID, &r.folderID, &r.folderRoot, &r.folder, &m.Title, &m.Subtitle, &m.Description, &m.Publisher, &m.PublishedDate, &m.PublishedYear, &m.PageCount, &m.SeriesIndex, &m.SeriesName, &m.Language, &m.ISBN10, &m.ISBN13, &r.book.HardcoverEditionID, &authors, &providers, &locks, &genres); e != nil {
 			return nil, e
 		}
 		if authors != "" {
 			m.Authors = strings.Split(authors, "\x1f")
+		}
+		r.book.LibraryFolderID = r.folderID
+		if e = json.Unmarshal([]byte(providers), &r.book.ProviderIDs); e != nil {
+			return nil, e
+		}
+		if e = json.Unmarshal([]byte(locks), &r.book.LockedFields); e != nil {
+			return nil, e
+		}
+		if e = json.Unmarshal([]byte(genres), &m.Genres); e != nil {
+			return nil, e
 		}
 		out = append(out, r)
 	}
@@ -523,7 +489,13 @@ func (o *Organizer) recover(ctx context.Context) error {
 	return nil
 }
 
-func (o *Organizer) Organize(ctx context.Context, book domain.Book) (result Result, err error) {
+// Organize only moves this record. Merging waits until all saved curation has
+// been applied and a reconciliation plan has selected the survivor's metadata.
+func (o *Organizer) Organize(ctx context.Context, book domain.Book) (Result, error) {
+	return o.OrganizeGroup(ctx, book, []int{book.ID})
+}
+
+func (o *Organizer) OrganizeGroup(ctx context.Context, book domain.Book, ids []int) (result Result, err error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.db == nil {
@@ -572,20 +544,33 @@ func (o *Organizer) Organize(ctx context.Context, book domain.Book) (result Resu
 	}
 	base := records[idx]
 	selected := []record{base}
-	for _, r := range records {
-		if r.book.ID != base.book.ID && r.folderID == base.folderID && match(base.book, r.book) { // Require each pair to match, preventing conflicting edition bridges.
-			good := true
-			for _, s := range selected {
-				if !match(s.book, r.book) {
-					good = false
-					break
-				}
+	for _, id := range ids {
+		if id == base.book.ID {
+			continue
+		}
+		found := false
+		for _, r := range records {
+			if r.book.ID != id {
+				continue
 			}
-			if good {
-				selected = append(selected, r)
+			if r.folderID != base.folderID {
+				return result, errors.New("merge crosses library folder")
 			}
+			selected = append(selected, r)
+			found = true
+		}
+		if !found {
+			return result, fmt.Errorf("merge member %d disappeared", id)
 		}
 	}
+	// Snapshot all references and transfer personal data before moving any bytes.
+	// A new/unsupported schema or conflicting unique key fails the transaction.
+	for _, r := range selected[1:] {
+		if err = o.transferReferences(ctx, tx, r.book.ID, base.book.ID); err != nil {
+			return
+		}
+	}
+
 	if err = checkPath(o.root, base.folderRoot, true); err != nil {
 		return
 	}

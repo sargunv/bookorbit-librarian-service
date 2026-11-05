@@ -41,6 +41,10 @@ compatibility before upgrading BookOrbit.
 6. Back up originals outside the scanned library, apply metadata and covers
    through BookOrbit, write into the book files, then organize files and catalog
    paths using a recovery journal.
+7. Once all jobs have settled, reconcile alternate formats from saved source
+   selections. Normalize language identity, preserve personal data, then verify
+   the surviving metadata and file IDs before recording success. This final pass
+   makes no model or metadata-provider calls.
 
 The service sends bibliographic metadata, basenames, nearby folder names and
 cover contact sheets to its model endpoint. It does not send book contents or
@@ -225,20 +229,75 @@ so apply library settings through BookOrbit or restart it after SQL changes.
 
 Files are laid out as `Author/[Series]/Title [book-ID]/Title.ext`. Stable IDs
 avoid ambiguous collisions. A duplicate extension gets a file-ID suffix; files
-are never overwritten. Alternate formats are grouped only with matching
-Hardcover edition IDs, or matching ISBN plus normalized title, language and
-authors, within one library folder. Different or uncertain editions stay
-separate. Empty source folders may remain. Grouped catalog entries lose the
-removed entry's user state; this service does not preserve progress,
-annotations, ratings or collections when merging. Actual distinct files are
-retained, including duplicate formats.
+are never overwritten. Alternate formats are reconciled after the curation queue
+settles. Matching requires pairwise agreement on library, title, authors and
+canonical language, plus a shared validated ISBN, Hardcover edition, or work
+identifier selected by the saved curation. Translations and unrelated same-title
+books remain separate. A regional language tag or an absent ISBN does not defeat
+independently supported work identity. Files with duplicate formats are retained
+with distinct file IDs and collision-safe names.
 
-The PostgreSQL role needs `CONNECT` on the database, `USAGE` on `public`,
-`SELECT` on `books`, `book_files`, `book_metadata`, `libraries`,
-`library_folders`, `book_authors`, `authors`, `scan_jobs`; `UPDATE` on `books`,
-`book_files`; `UPDATE(id)` on `libraries`; and `DELETE` on `books`. It does not
-need superuser access or schema mutation permissions. Additional grants required
-by future BookOrbit schema changes should be reviewed narrowly.
+The lowest surviving book ID is stable. Explicit saved work-field selections win
+over a sibling's unchanged metadata; the latest explicit selection resolves
+conflicts. Existing edition fields on the survivor are retained; missing fields
+can use saved evidence. Changing one ISBN clears a conflicting retained
+counterpart, rather than inventing the missing ISBN. A locked conflicting value
+stops reconciliation. Metadata and cover selections from historically deleted
+records can be recovered from saved jobs. Historical activity links and current
+thumbnails follow recorded book aliases.
+
+All foreign-key references to a removed book are inspected. Personal data is
+transferred inside the merge transaction before deletion; file IDs and surrogate
+IDs (including annotation children) are preserved. Composite-key conflicts keep
+the latest timestamped value; equal reading-status timestamps favor completed
+reading. Collection/tag membership is combined. Every source reference row,
+including conflicting versions and superseded bibliographic metadata, is saved
+under `ORIGINALS_ROOT/merges/` before any move or deletion. Curated metadata and
+derived caches are intentionally rebuilt from the survivor. Unknown uniqueness
+conflicts or missing grants stop the merge before files move. Locks are
+combined.
+
+Extend the original PostgreSQL organizer grants using the reviewed
+[`ops/grants.sql`](ops/grants.sql), with the role supplied through psql's `role`
+variable. It grants access only to BookOrbit's book-related relations and the
+required genre/collection lookups. It does not grant superuser or schema access.
+Review those relations again when upgrading BookOrbit.
+
+For maintenance/recovery, stop the worker and take fresh PostgreSQL, application
+and SQLite backups. The following commands run in the same configured container
+environment as the service, without calling `serve`:
+
+```sh
+librarian reconcile --plan /private/reconcile.json
+librarian reconcile --plan /private/reconcile.json --apply
+```
+
+The first command writes a private plan without changing BookOrbit. Inspect its
+survivor IDs, field sources, cover choices and file IDs. Applying reuses that
+exact plan and verifies BookOrbit readback. A retry resumes the saved plan;
+unexpected edits made since planning are errors. Applied groups and aliases are
+recorded transactionally in SQLite. Preserve plans alongside SQLite/originals.
+The idle worker automatically performs the same final pass and archives its
+plans next to SQLite; failed/planned curation jobs prevent automatic merging.
+
+To recover personal data deleted by an older version, extract book-reference
+rows from the matching pre-merge custom-format PostgreSQL backup on the host:
+
+```sh
+python3 ops/export-recovery.py --container YOUR_POSTGRES_CONTAINER \
+  --dump /private/before-librarian.dump --output /private/references.json
+librarian reconcile --plan /private/reconcile.json --apply \
+  --recovery /private/references.json
+```
+
+Recovery follows only recorded historical merge aliases, preserves newer user
+edits, and can be repeated. It does not reimport old bibliographic metadata.
+Memberships of collections removed since the backup are counted as retired and
+retained in evidence, rather than recreating the collections. Keep all private
+recovery files outside Git. Rehearse against a disposable database copy first;
+`LIBRARIAN_TEST_DATABASE_URL` enables real FK/conflict tests only for databases
+named `librarian_test_*`. Private snapshot/alias paths additionally enable the
+backup-recovery rehearsal test.
 
 Moves claim destinations with hard links before unlinking the source. When NAS
 ownership prevents linking an untouched source, a verified temporary copy

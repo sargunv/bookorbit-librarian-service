@@ -37,6 +37,12 @@
           >
         </div>
       </section>
+      {{if .ReconciliationError}}
+      <p role="alert">
+        Library reconciliation needs attention. Details are available through
+        the administrator API.
+      </p>
+      {{end}}
       <section class="overview" aria-label="Recorded outcomes">
         <div>
           <strong>{{.Stats.Metadata}}</strong><span>Metadata updated</span>
@@ -143,7 +149,7 @@
           <div class="event-details">
             <div class="detail-heading">
               <strong>{{.Label}}</strong>{{if $.LibraryURL}}<a
-                href="{{bookURL $.LibraryURL .BookID}}"
+                href="{{bookURL $.LibraryURL .CanonicalBookID}}"
                 >Open in BookOrbit</a
               >{{end}}<a
                 href="/?before={{cursor .ID}}{{if $.History}}&amp;history=all{{end}}#event-{{.ID}}"

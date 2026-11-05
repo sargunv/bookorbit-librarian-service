@@ -377,5 +377,16 @@ func BuildProposal(book domain.Book, candidates []domain.Candidate, d domain.Dec
 			}
 		}
 	}
+	for field, source := range domain.RejectTranslatedISBNs(book, p.Patch, []domain.Proposal{p}) {
+		p.Provenance[field] = source
+	}
+	if err := domain.CoherentISBNPatch(book, p.Patch); err != nil {
+		return p, err
+	}
+	for _, field := range []string{"isbn10", "isbn13"} {
+		if string(p.Patch[field]) == "null" && p.Provenance[field] == "" {
+			p.Provenance[field] = "cleared conflicting retained ISBN counterpart"
+		}
+	}
 	return p, nil
 }

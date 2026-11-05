@@ -36,6 +36,11 @@ func (s *Service) captureCover(ctx context.Context, j store.Job, version string)
 }
 
 func (s *Service) saveThumbnail(ctx context.Context, j store.Job, version string) ([]byte, error) {
+	id, err := s.db.ResolveBook(ctx, j.BookID)
+	if err != nil {
+		return nil, err
+	}
+	j.BookID = id
 	data, err := s.books.CoverImage(ctx, j.BookID)
 	if err != nil {
 		return nil, err
