@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 import zlib
 
@@ -21,6 +22,21 @@ spec.loader.exec_module(processor)
 
 
 class ImportTests(unittest.TestCase):
+    def test_download_matches_upstream_headers_and_preserves_bytes(self):
+        def response(request):
+            self.assertEqual(request.get_header('User-agent'), 'book2png')
+            self.assertEqual(request.get_header('Accept'), '*/*')
+            return io.BytesIO(b'example book bytes')
+        with tempfile.TemporaryDirectory() as temp, patch.object(processor, 'urlopen', side_effect=response):
+            output = Path(temp) / 'download.partial'
+            processor.download_book('https://example.invalid/book', output)
+            self.assertEqual(output.read_bytes(), b'example book bytes')
+
+    def test_download_limit(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(processor, 'MAX_BYTES', 4), patch.object(processor, 'urlopen', return_value=io.BytesIO(b'12345')):
+            with self.assertRaisesRegex(ValueError, 'download too large'):
+                processor.download_book('https://example.invalid/book', Path(temp) / 'download.partial')
+
     def test_generated_adobe_epub_decrypt_and_resume(self):
         with tempfile.TemporaryDirectory() as temp:
             work = Path(temp)

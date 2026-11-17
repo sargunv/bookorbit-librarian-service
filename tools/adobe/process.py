@@ -105,6 +105,21 @@ def validate(path, ext):
         raise ValueError('unsupported format')
 
 
+def download_book(url, destination):
+    # Match DeACSM's standalone downloader; Kobo rejects Python's default UA.
+    request = urllib.request.Request(url, headers={
+        'Accept': '*/*',
+        'User-Agent': 'book2png',
+    })
+    with urlopen(request) as response, destination.open('wb') as output:
+        size = 0
+        while chunk := response.read(65536):
+            size += len(chunk)
+            if size > MAX_BYTES:
+                raise ValueError('download too large')
+            output.write(chunk)
+
+
 def fulfill(source, work, account):
     sys.path.insert(0, str(ROOT / 'vendor/deacsm'))
     import libadobe
@@ -131,13 +146,7 @@ def fulfill(source, work, account):
     download = work / 'download.bin'
     if not download.exists():
         temp = work / 'download.partial'
-        with urlopen(info.findtext(ADE + 'src')) as response, temp.open('wb') as output:
-            size = 0
-            while chunk := response.read(65536):
-                size += len(chunk)
-                if size > MAX_BYTES:
-                    raise ValueError('download too large')
-                output.write(chunk)
+        download_book(info.findtext(ADE + 'src'), temp)
         commit(temp, download)
     signature = download.open('rb').read(5)
     if signature.startswith(b'PK'):
