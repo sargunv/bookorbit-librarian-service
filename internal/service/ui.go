@@ -242,7 +242,7 @@ func (s *Service) activityPage(w http.ResponseWriter, r *http.Request) {
 	s.summaryMu.RUnlock()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; connect-src 'self'; style-src 'self'; script-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if err = activityTemplate.Execute(w, page); err != nil {
 		return
