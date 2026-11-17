@@ -11,6 +11,7 @@ import (
 )
 
 type Config struct {
+	ImportRoot, ImportCommand, ImportSecrets, ImportAccount     string
 	UIProxyToken, SummaryModel, BookOrbitPublicURL              string
 	SummaryInterval                                             time.Duration
 	Listen, StatePath, AdminToken, BookOrbitURL, BookOrbitToken string
@@ -24,6 +25,10 @@ type Config struct {
 
 func Load() (Config, error) {
 	c := Config{Listen: value("LISTEN_ADDR", ":8080"), StatePath: value("STATE_PATH", "/data/librarian.db"), AdminToken: os.Getenv("ADMIN_TOKEN"), BookOrbitURL: os.Getenv("BOOKORBIT_URL"), BookOrbitToken: os.Getenv("BOOKORBIT_MAGIC_LINK_TOKEN"), ModelURL: os.Getenv("MODEL_BASE_URL"), ModelKey: os.Getenv("MODEL_API_KEY"), VisionModel: value("MODEL_VISION", "claude/haiku-5-5"), MetadataModel: value("MODEL_METADATA", "chatgpt/gpt-6.1-terra"), LibraryRoot: os.Getenv("LIBRARY_ROOT"), OriginalsRoot: os.Getenv("ORIGINALS_ROOT"), PostgresDSN: os.Getenv("BOOKORBIT_DATABASE_URL"), Providers: strings.Split(value("METADATA_PROVIDERS", "hardcover,goodreads"), ",")}
+	c.ImportRoot = os.Getenv("IMPORT_ROOT")
+	c.ImportCommand = value("IMPORT_COMMAND", "/opt/adobe/process.py")
+	c.ImportSecrets = value("IMPORT_SECRETS", "/run/adobe-secrets")
+	c.ImportAccount = value("IMPORT_ACCOUNT", "/data/adobe-account")
 	c.UIProxyToken = os.Getenv("UI_PROXY_TOKEN")
 	c.SummaryModel = value("MODEL_SUMMARY", c.VisionModel)
 	c.BookOrbitPublicURL = os.Getenv("BOOKORBIT_PUBLIC_URL")

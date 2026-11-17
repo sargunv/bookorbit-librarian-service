@@ -30,7 +30,11 @@ document.addEventListener(
 );
 if (!new URLSearchParams(location.search).has("before")) {
   setInterval(() => {
-    if (!document.hidden && !document.querySelector("details[open]"))
+    if (
+      !document.hidden &&
+      !document.querySelector("details[open]") &&
+      !window.librarianImportActive?.()
+    )
       location.reload();
   }, 30000);
 }

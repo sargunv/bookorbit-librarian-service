@@ -4,8 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Activity · BookOrbit Librarian</title>
-    <link rel="stylesheet" href="/assets/activity.css?v=5" />
-    <script src="/assets/activity.js?v=5" defer></script>
+    <link rel="stylesheet" href="/assets/activity.css?v=6" />
+    <script src="/assets/activity.js?v=6" defer></script>
+    {{if .ImportsEnabled}}
+    <script src="/assets/imports.js?v=1" defer></script>
+    {{end}}
   </head>
   <body>
     <header class="masthead">
@@ -15,6 +18,29 @@
       >{{end}}
     </header>
     <main>
+      {{if .ImportsEnabled}}
+      <section class="import-panel" aria-label="Import books">
+        <h2>Import books</h2>
+        <p>
+          Upload ACSM tickets or Adobe-encrypted EPUB/PDF books. Your saved
+          Adobe account and keys are used privately, then the books enter your
+          library for metadata curation. DRM-free EPUB/PDF files work too.
+        </p>
+        <form id="import-form">
+          <label for="import-files">Books · up to 250 MiB each</label>
+          <input
+            id="import-files"
+            type="file"
+            accept=".acsm,.epub,.pdf"
+            multiple
+            required
+          />
+          <button type="submit">Import books</button>
+        </form>
+        <p id="import-message" role="status" aria-live="polite"></p>
+        <ul id="import-jobs" aria-label="Recent imports"></ul>
+      </section>
+      {{end}}
       <section class="worker" aria-label="Worker status">
         <div class="worker-state">
           <span class="signal {{if .Paused}}paused{{end}}"></span

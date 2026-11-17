@@ -351,3 +351,65 @@ inputs, field/edition sources, backups, paths, collisions, lease recovery and
 authenticated operations. There is no external service access in these tests.
 Deployment requires a small real-book exercise against the exact BookOrbit
 version and filesystem.
+
+## Adobe book imports
+
+Set `IMPORT_ROOT` to enable the dashboard's **Import books** panel. It accepts
+ACSM, EPUB and PDF files up to 250 MiB each, including DRM-free files. The
+existing authenticated UI capability grants import and retry operations when
+this feature is enabled; `/v1/` administrator operations remain separate. POSTs
+require a custom same-origin header and reject mismatched Origins.
+
+| Variable         | Purpose / default                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------ |
+| `IMPORT_ROOT`    | Private durable job/file directory; disabled when unset                              |
+| `IMPORT_COMMAND` | Python processor path, `/opt/adobe/process.py`                                       |
+| `IMPORT_SECRETS` | Read-only directory containing Adobe-only `dedrm.json`, `/run/adobe-secrets`         |
+| `IMPORT_ACCOUNT` | Writable copy of `activation.xml`, `device.xml`, `devicesalt`, `/data/adobe-account` |
+
+The container includes selected pinned DeDRM and DeACSM modules, invoked in a
+separate Python process without Calibre. See
+[component provenance](tools/adobe/NOTICE.md). The working activation must be
+writable because distributor authorization adds operator and license
+certificates. Preserve the original activation ZIP privately. Mount only
+`adeptkeys` in the runtime JSON; other saved Calibre credentials are not needed.
+All these paths must be readable by the runtime UID; job and secret files use
+mode 0600 and directories 0700.
+
+Imports save source bytes, fulfillment responses, encrypted downloads, validated
+outputs and job state outside the library. Files remain until explicitly cleaned
+up by the operator; there is no automatic deletion. Identical source uploads
+reuse their existing job. Progress survives restart. Failed imports need an
+explicit retry; saved fulfillment responses/downloads and BookOrbit session IDs
+are reused. A crash during the distributor's fulfillment request itself can
+require repeating that request; upstream session retention/expiry also limits
+recovery. A failed or expired BookOrbit session is held for inspection rather
+than automatically creating another book. Originals and decrypted books are
+private data and belong in backups, never Git.
+
+The worker enforces request timeouts, public HTTP(S) destinations, verified TLS,
+download/expanded EPUB limits and safe XML parsing. Diagnostic output is
+suppressed because upstream can print credentials and signed URLs. The process
+has a 15-minute job timeout. Adobe DRM removal supports matching ADE keys;
+Kindle/Kobo DRM, password-protected PDFs, new Adobe DRM variants and loan-return
+management are outside this flow. The saved fulfillment response retains any
+loan information. Failures never upload the encrypted input as a fallback.
+
+BookOrbit receives validated files through its resumable upload API, then queues
+normal librarian curation. Its service account needs `library_upload` and access
+to the target library. Native import processing completes before curation is
+queued; upload is serialized with librarian metadata writes and inventory
+planning. No book content, activation files or keys go to the models.
+
+Checks include `mise run check`, `mise run test`, `mise run build`, plus:
+
+```sh
+podman run --rm --network none --entrypoint python3 \
+  -v "$PWD/tools/adobe:/test:ro" YOUR_BUILT_IMAGE /test/test_process.py
+```
+
+The Python tests generate their own RSA/AES encrypted EPUB fixture, check output
+bytes and retry behavior, and exercise XML/network boundaries. Before
+deployment, exercise ACSM fulfillment with a public Adobe sample and the
+intended activation, then verify the exact BookOrbit upload API and OCI health.
+Back up BookOrbit and librarian state before changing the image or permissions.
