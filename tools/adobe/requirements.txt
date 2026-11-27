@@ -1,5 +1,5 @@
 asn1crypto==1.5.1
-lxml==5.4.0
+lxml==6.1.0
 pycryptodome==3.23.0
 pikepdf==9.11.0
 Pillow==13.0.0
