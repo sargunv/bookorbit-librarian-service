@@ -54,6 +54,9 @@ func TestUIRequiresSeparateCapabilityAndEscapesModelText(t *testing.T) {
 		if w.Code != tc.status {
 			t.Fatalf("%s with %s: %d", tc.path, tc.key, w.Code)
 		}
+		if tc.status == 200 && !strings.Contains(w.Header().Get("Content-Security-Policy"), "connect-src 'self'") {
+			t.Fatal("dashboard CSP blocks same-origin import uploads and polling")
+		}
 		if tc.status == 200 && !strings.Contains(w.Body.String(), "&lt;script&gt;") {
 			t.Fatal("escaped event missing from rendered dashboard")
 		}

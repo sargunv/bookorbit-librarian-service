@@ -61,6 +61,7 @@ type activityPage struct {
 	Counts                           map[string]int
 	Total, Completed, Percent        int
 	Paused                           bool
+	ImportsEnabled                   bool
 	Active                           []domain.ActivityEvent
 	Rows                             []activityRow
 	Stats                            activityStats
@@ -86,9 +87,12 @@ func (s *Service) authorizeUI(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Service) mountUI(mux *http.ServeMux) {
+	if s.imports != nil {
+		s.imports.Mount(mux, s.authorizeUI)
+	}
 	mux.HandleFunc("GET /assets/{name}", func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
-		if name != "activity.css" && name != "activity.js" {
+		if name != "activity.css" && name != "activity.js" && name != "imports.js" {
 			http.NotFound(w, r)
 			return
 		}
@@ -160,7 +164,7 @@ func (s *Service) activityPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid activity filter", 400)
 		return
 	}
-	page := activityPage{ReconciliationError: s.reconciliationError(), Counts: counts, Paused: s.paused.Load(), Active: active, LibraryURL: s.cfg.BookOrbitPublicURL, History: history, Filter: filter, Filters: filters}
+	page := activityPage{ImportsEnabled: s.imports != nil, ReconciliationError: s.reconciliationError(), Counts: counts, Paused: s.paused.Load(), Active: active, LibraryURL: s.cfg.BookOrbitPublicURL, History: history, Filter: filter, Filters: filters}
 	explanations := map[int64]string{}
 	for _, summary := range summaries {
 		for _, highlight := range summary.Highlights {
@@ -238,7 +242,7 @@ func (s *Service) activityPage(w http.ResponseWriter, r *http.Request) {
 	s.summaryMu.RUnlock()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; connect-src 'self'; style-src 'self'; script-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if err = activityTemplate.Execute(w, page); err != nil {
 		return

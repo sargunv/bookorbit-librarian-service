@@ -5,3 +5,7 @@
 !cmd/**
 !internal/
 !internal/**
+
+!tools/
+!tools/adobe/
+!tools/adobe/**

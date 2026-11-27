@@ -22,11 +22,13 @@ import (
 	"github.com/sargunv/bookorbit-librarian-service/internal/config"
 	"github.com/sargunv/bookorbit-librarian-service/internal/curator"
 	"github.com/sargunv/bookorbit-librarian-service/internal/domain"
+	"github.com/sargunv/bookorbit-librarian-service/internal/importer"
 	"github.com/sargunv/bookorbit-librarian-service/internal/organize"
 	"github.com/sargunv/bookorbit-librarian-service/internal/store"
 )
 
 type Service struct {
+	imports        *importer.Manager
 	cfg            config.Config
 	db             *store.Store
 	books          *bookorbit.Client
@@ -62,13 +64,35 @@ func New(c config.Config) (*Service, error) {
 	}
 	judge := curator.New(c.ModelURL, c.ModelKey, c.VisionModel, c.MetadataModel)
 	judge.SetRequestInterval(c.ModelInterval)
-	return &Service{cfg: c, db: db, books: bookorbit.New(c.BookOrbitURL, c.BookOrbitToken), judge: judge, organizer: org}, nil
+	s := &Service{cfg: c, db: db, books: bookorbit.New(c.BookOrbitURL, c.BookOrbitToken), judge: judge, organizer: org}
+	if c.ImportRoot != "" {
+		s.imports, e = importer.New(c.ImportRoot, c.ImportCommand, c.ImportSecrets, c.ImportAccount, func(ctx context.Context, path, name, state string, mark func(string) error) (int, error) {
+			s.discoveryMu.Lock()
+			defer s.discoveryMu.Unlock()
+			s.applyMu.Lock()
+			defer s.applyMu.Unlock()
+			return s.books.UploadFile(ctx, c.LibraryID, path, name, state, mark)
+		}, func(ctx context.Context, id int) error {
+			_, err := s.db.Enqueue(ctx, []int{id}, curator.PolicyVersion)
+			return err
+		})
+		if e != nil {
+			_ = org.Close()
+			_ = db.Close()
+			return nil, e
+		}
+	}
+	return s, nil
 }
 
 func (s *Service) Close() error { s.wg.Wait(); return errors.Join(s.organizer.Close(), s.db.Close()) }
 
 func (s *Service) Start(ctx context.Context) {
 	s.needsReconcile.Store(true)
+	if s.imports != nil {
+		s.wg.Add(1)
+		go func() { defer s.wg.Done(); s.imports.Run(ctx) }()
+	}
 	if s.cfg.UIProxyToken != "" {
 		s.wg.Add(1)
 		go func() { defer s.wg.Done(); s.summarizeActivity(ctx) }()
