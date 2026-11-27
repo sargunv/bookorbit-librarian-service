@@ -380,12 +380,16 @@ Imports save source bytes, fulfillment responses, encrypted downloads, validated
 outputs and job state outside the library. Files remain until explicitly cleaned
 up by the operator; there is no automatic deletion. Identical source uploads
 reuse their existing job. Progress survives restart. Failed imports need an
-explicit retry; saved fulfillment responses/downloads and BookOrbit session IDs
-are reused. A crash during the distributor's fulfillment request itself can
-require repeating that request; upstream session retention/expiry also limits
-recovery. A failed or expired BookOrbit session is held for inspection rather
-than automatically creating another book. Originals and decrypted books are
-private data and belong in backups, never Git.
+explicit retry; saved fulfillment responses and downloads are reused. A crash
+during the distributor's fulfillment request itself can require repeating that
+request. BookOrbit's multipart upload has no idempotency key, so the job records
+each attempt before sending. A rejected upload is retried normally. If the
+response is lost, the job keeps the attempt and refuses to upload again rather
+than risk a duplicate book. Check BookOrbit for the book, then stop the worker
+and edit that job's `job.json`: set `bookId` if the book arrived, or remove
+`sessionId` if it did not, and retry. Legacy session IDs on unfinished jobs are
+held the same way. Originals and decrypted books are private data and belong in
+backups, never Git.
 
 The worker enforces request timeouts, public HTTP(S) destinations, verified TLS,
 download/expanded EPUB limits and safe XML parsing. Diagnostic output is
@@ -395,11 +399,13 @@ Kindle/Kobo DRM, password-protected PDFs, new Adobe DRM variants and loan-return
 management are outside this flow. The saved fulfillment response retains any
 loan information. Failures never upload the encrypted input as a fallback.
 
-BookOrbit receives validated files through its resumable upload API, then queues
-normal librarian curation. Its service account needs `library_upload` and access
-to the target library. Native import processing completes before curation is
-queued; upload is serialized with librarian metadata writes and inventory
-planning. No book content, activation files or keys go to the models.
+BookOrbit receives validated files through the web app's multipart library
+upload, then queues normal librarian curation. BookOrbit 3.7 and later reserve
+the resumable `/uploads` API for attested official apps. Its service account
+needs `library_upload` and access to the target library. BookOrbit extracts
+embedded metadata after answering, so curation is queued 30 seconds later;
+upload is serialized with librarian metadata writes and inventory planning. No
+book content, activation files or keys go to the models.
 
 Checks include `mise run check`, `mise run test`, `mise run build`, plus:
 

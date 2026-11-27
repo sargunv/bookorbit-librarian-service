@@ -22,6 +22,9 @@ import (
 
 const MaxBytes int64 = 250 << 20
 
+// uploadSettle covers BookOrbit's asynchronous embedded-metadata extraction.
+const uploadSettle = 30 * time.Second
+
 type Job struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
@@ -40,9 +43,12 @@ type diskJob struct {
 	SessionID string `json:"sessionId,omitempty"`
 }
 type (
-	Upload  func(context.Context, string, string, string, string, func(string) error) (int, error)
+	// Upload receives the output path, filename and saved upload state, and
+	// durably records state changes through its callback.
+	Upload  func(context.Context, string, string, string, func(string) error) (int, error)
 	Manager struct {
 		root, command, secrets, account string
+		settle                          time.Duration
 		mu                              sync.Mutex
 		upload                          Upload
 		enqueue                         func(context.Context, int) error
@@ -53,7 +59,7 @@ func New(root, command, secrets, account string, upload Upload, enqueue func(con
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, err
 	}
-	return &Manager{root: root, command: command, secrets: secrets, account: account, upload: upload, enqueue: enqueue}, nil
+	return &Manager{root: root, command: command, secrets: secrets, account: account, settle: uploadSettle, upload: upload, enqueue: enqueue}, nil
 }
 func (m *Manager) path(id string) string { return filepath.Join(m.root, id) }
 func (m *Manager) save(j Job) error {
@@ -250,14 +256,27 @@ func (m *Manager) process(ctx context.Context, j Job) {
 			return
 		}
 		filename := strings.TrimSuffix(j.Name, filepath.Ext(j.Name)) + filepath.Ext(output.Filename)
-		book, e := m.upload(ctx, j.ID, filepath.Join(work, output.Filename), filename, j.Session, func(id string) error { j.Session = id; return update() })
+		book, e := m.upload(ctx, filepath.Join(work, output.Filename), filename, j.Session, func(state string) error { j.Session = state; return update() })
 		if e != nil {
-			fail("BookOrbit upload did not finish. Retry resumes the saved upload session.")
+			if j.Session != "" {
+				fail("BookOrbit may already have this book. Check BookOrbit before retrying; see the service README.")
+			} else {
+				fail("BookOrbit upload failed. Retry uploads again.")
+			}
 			return
 		}
 		j.BookID = book
+		j.Session = ""
 		if update() != nil {
 			return
+		}
+		// BookOrbit reads embedded metadata after answering a multipart upload.
+		// Curation must not race that write.
+		select {
+		case <-ctx.Done():
+			fail("Processing interrupted or timed out. Retry resumes saved progress.")
+			return
+		case <-time.After(m.settle):
 		}
 	}
 	if e := m.enqueue(ctx, j.BookID); e != nil {

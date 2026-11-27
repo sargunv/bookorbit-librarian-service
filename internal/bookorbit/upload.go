@@ -1,142 +1,114 @@
 package bookorbit
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
-	"time"
 )
 
-type UploadSession struct {
-	ID        string `json:"id"`
-	Status    string `json:"status"`
-	Received  int64  `json:"receivedBytes"`
-	ChunkSize int64  `json:"chunkSizeBytes"`
-	BookID    int    `json:"bookId"`
-}
+// UploadPending marks a multipart upload whose outcome is not yet known.
+const UploadPending = "multipart-pending"
 
-// UploadFile resumes a persisted upstream session. save must durably record its
-// ID before any bytes are sent; completed sessions are never uploaded again.
-func (c *Client) UploadFile(ctx context.Context, key string, library int, path, filename, sessionID string, save func(string) error) (int, error) {
+// ErrUploadUnknown means an earlier attempt may have created a book. Repeating
+// it automatically could add a duplicate.
+var ErrUploadUnknown = errors.New("bookorbit: earlier upload outcome unknown")
+
+// UploadFile adds a file through the library multipart upload used by
+// BookOrbit's web app. Resumable /uploads sessions are reserved for attested
+// official apps since BookOrbit 3.7.
+//
+// The route has no idempotency key, so mark must durably record UploadPending
+// before any bytes are sent. A definite rejection clears the mark. A lost
+// response keeps it, and any recorded state makes UploadFile refuse to send
+// again: legacy session IDs and pending attempts both need inspection.
+func (c *Client) UploadFile(ctx context.Context, library int, path, filename, state string, mark func(string) error) (int, error) {
+	if state != "" {
+		return 0, ErrUploadUnknown
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return 0, errors.New("cannot open import output")
 	}
 	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return 0, err
-	}
-	var session UploadSession
-	if sessionID == "" {
-		hash := sha256.New()
-		if _, err = io.Copy(hash, f); err != nil {
-			return 0, err
-		}
-		payload := map[string]any{"filename": filename, "sizeBytes": info.Size(), "sha256": hex.EncodeToString(hash.Sum(nil)), "idempotencyKey": "librarian-" + key, "target": map[string]any{"kind": "library", "libraryId": library}}
-		if err = c.json(ctx, "POST", "/uploads", payload, &session); err != nil {
-			return 0, err
-		}
-		if session.ID == "" {
-			return 0, errors.New("upload session missing ID")
-		}
-		if err = save(session.ID); err != nil {
-			return 0, err
-		}
-	} else if err = c.json(ctx, "GET", "/uploads/"+sessionID, nil, &session); err != nil {
-		return 0, err
-	}
-	for {
-		switch session.Status {
-		case "completed":
-			if session.BookID < 1 {
-				return 0, errors.New("upload completed without book ID")
-			}
-			return session.BookID, nil
-		case "processing":
-			select {
-			case <-ctx.Done():
-				return 0, ctx.Err()
-			case <-time.After(time.Second):
-			}
-			if err = c.json(ctx, "GET", "/uploads/"+session.ID, nil, &session); err != nil {
-				return 0, err
-			}
-		case "receiving":
-			if session.Received < 0 || session.Received > info.Size() || session.ChunkSize < 1 || session.ChunkSize > 16<<20 {
-				return 0, errors.New("invalid upload offset or chunk size")
-			}
-			if session.Received == info.Size() {
-				if err = c.json(ctx, "POST", "/uploads/"+session.ID+"/complete", nil, &session); err != nil {
-					return 0, err
-				}
-				continue
-			}
-			if _, err = f.Seek(session.Received, io.SeekStart); err != nil {
-				return 0, err
-			}
-			var body bytes.Buffer
-			writer := multipart.NewWriter(&body)
-			part, e := writer.CreateFormFile("file", filename)
-			if e != nil {
-				return 0, e
-			}
-			if _, err = io.CopyN(part, f, min(session.ChunkSize, info.Size()-session.Received)); err != nil {
-				return 0, err
-			}
-			if err = writer.Close(); err != nil {
-				return 0, err
-			}
-			if err = c.uploadChunk(ctx, session.ID, session.Received, writer.FormDataContentType(), body.Bytes(), &session); err != nil {
-				return 0, err
-			}
-		default:
-			return 0, errors.New("upstream upload failed or expired; inspect before creating another import")
-		}
-	}
-}
-
-func (c *Client) uploadChunk(ctx context.Context, id string, offset int64, contentType string, body []byte, out any) error {
 	token, err := c.authenticate(ctx, "")
 	if err != nil {
-		return err
+		return 0, err
+	}
+	if err = mark(UploadPending); err != nil {
+		return 0, err
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		req, e := http.NewRequestWithContext(ctx, "POST", c.base+"/uploads/"+id+"/chunks", bytes.NewReader(body))
+		if _, err = f.Seek(0, io.SeekStart); err != nil {
+			return 0, err
+		}
+		body, writer := io.Pipe()
+		form := multipart.NewWriter(writer)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			part, e := form.CreateFormFile("file", filename)
+			if e == nil {
+				_, e = io.Copy(part, f)
+			}
+			if e == nil {
+				e = form.Close()
+			}
+			_ = writer.CloseWithError(e)
+		}()
+		req, e := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/libraries/"+strconv.Itoa(library)+"/upload", body)
 		if e != nil {
-			return e
+			_ = body.Close()
+			<-done
+			return 0, errors.New("bookorbit: invalid upload URL")
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Content-Type", contentType)
-		req.Header.Set("Upload-Offset", strconv.FormatInt(offset, 10))
+		req.Header.Set("Content-Type", form.FormDataContentType())
 		resp, e := c.http.Do(req)
+		// The writer must stop reading f before a retry rewinds it.
+		_ = body.Close()
+		<-done
 		if e != nil {
-			return errors.New("upload chunk transport failed; retry resumes from server offset")
+			if notSent(e) {
+				return 0, errors.Join(mark(""), fmt.Errorf("bookorbit: upload not sent: %w", safeTransport(e)))
+			}
+			return 0, fmt.Errorf("bookorbit: upload response lost: %w", safeTransport(e))
 		}
-		if resp.StatusCode == 401 && attempt == 0 {
+		if resp.StatusCode == http.StatusUnauthorized && attempt == 0 {
 			_ = resp.Body.Close()
-			token, err = c.authenticate(ctx, token)
-			if err != nil {
-				return err
+			if token, err = c.authenticate(ctx, token); err != nil {
+				return 0, errors.Join(mark(""), err)
 			}
 			continue
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			_ = resp.Body.Close()
-			return fmt.Errorf("upload chunk HTTP %d", resp.StatusCode)
+			// BookOrbit removes stored bytes before it answers with an error.
+			return 0, errors.Join(mark(""), fmt.Errorf("bookorbit: upload HTTP %d", resp.StatusCode))
 		}
-		err = json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(out)
+		var result struct {
+			BookID int `json:"bookId"`
+		}
+		e = json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&result)
 		_ = resp.Body.Close()
-		return err
+		if e != nil || result.BookID < 1 {
+			return 0, errors.New("bookorbit: upload accepted without a book ID")
+		}
+		return result.BookID, nil
 	}
-	return errors.New("upload chunk unauthorized")
+	return 0, errors.Join(mark(""), errors.New("bookorbit: upload unauthorized"))
+}
+
+// notSent recognizes failures before a connection exists, when BookOrbit
+// cannot have received the file.
+func notSent(err error) bool {
+	var op *net.OpError
+	var dns *net.DNSError
+	return errors.As(err, &dns) || (errors.As(err, &op) && op.Op == "dial")
 }

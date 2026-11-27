@@ -66,12 +66,12 @@ func New(c config.Config) (*Service, error) {
 	judge.SetRequestInterval(c.ModelInterval)
 	s := &Service{cfg: c, db: db, books: bookorbit.New(c.BookOrbitURL, c.BookOrbitToken), judge: judge, organizer: org}
 	if c.ImportRoot != "" {
-		s.imports, e = importer.New(c.ImportRoot, c.ImportCommand, c.ImportSecrets, c.ImportAccount, func(ctx context.Context, key, path, name, session string, save func(string) error) (int, error) {
+		s.imports, e = importer.New(c.ImportRoot, c.ImportCommand, c.ImportSecrets, c.ImportAccount, func(ctx context.Context, path, name, state string, mark func(string) error) (int, error) {
 			s.discoveryMu.Lock()
 			defer s.discoveryMu.Unlock()
 			s.applyMu.Lock()
 			defer s.applyMu.Unlock()
-			return s.books.UploadFile(ctx, key, c.LibraryID, path, name, session, save)
+			return s.books.UploadFile(ctx, c.LibraryID, path, name, state, mark)
 		}, func(ctx context.Context, id int) error {
 			_, err := s.db.Enqueue(ctx, []int{id}, curator.PolicyVersion)
 			return err
